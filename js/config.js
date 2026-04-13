@@ -5,7 +5,7 @@
 const CONFIG = {
   // Claude API
   CLAUDE_MODEL: 'claude-haiku-4-5-20251001',
-  CLAUDE_API_URL: 'https://claude-proxy.teikokushouji.workers.dev'
+  CLAUDE_API_URL: 'https://claude-proxy.teikokushouji.workers.dev',
 
   // Google API スコープ
   SCOPES: [
