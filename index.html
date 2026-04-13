@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<!-- ============================================================
+     セットアップ画面（初回起動時のみ表示）
+     ============================================================ -->
+<div id="setupModal" class="modal-overlay active">
+  <div class="modal-box setup-box">
+    <div class="setup-logo">📋</div>
+    <h1 class="setup-title">Daily Tracker</h1>
+    <p class="setup-sub">1日のルーティンを管理して、幸福度を上げましょう</p>
+
+    <div class="setup-steps">
+      <!-- Step 1: Google Client ID -->
+      <div class="setup-step active" id="step1">
+        <div class="step-num">1 / 4</div>
+        <h2>Google Cloud の設定</h2>
+        <p>Google カレンダーと連携するために<br>OAuth クライアントIDが必要です。</p>
+        <a href="#" class="help-link" id="showClientIdHelp">取得方法を見る →</a>
+        <div class="help-box hidden" id="clientIdHelp">
+          <ol>
+            <li><a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> を開く</li>
+            <li>新しいプロジェクトを作成</li>
+            <li>「APIとサービス」→「認証情報」→「認証情報を作成」→「OAuthクライアントID」</li>
+            <li>アプリの種類：「ウェブアプリケーション」</li>
+            <li>承認済みのJavaScriptオリジンに <code>http://localhost:8080</code> と後でGitHub PagesのURLを追加</li>
+            <li>Google Sheets API と Google Calendar API を有効化</li>
+          </ol>
+        </div>
+        <input type="text" id="inputClientId" placeholder="例: 123456789-abc.apps.googleusercontent.com" class="setup-input">
+        <button class="btn-primary" id="btnStep1Next">次へ →</button>
+      </div>
+
+      <!-- Step 2: Google Sign In -->
+      <div class="setup-step hidden" id="step2">
+        <div class="step-num">2 / 4</div>
+        <h2>Googleアカウントを連携</h2>
+        <p>カレンダーとスプレッドシートに<br>アクセスするための認証を行います。</p>
+        <button class="btn-google" id="btnGoogleSignIn">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/></svg>
+          Googleでサインイン
+        </button>
+        <div class="auth-status hidden" id="authStatus">✅ 認証完了！</div>
+        <button class="btn-primary hidden" id="btnStep2Next">次へ →</button>
+      </div>
+
+      <!-- Step 3: Google Sheet -->
+      <div class="setup-step hidden" id="step3">
+        <div class="step-num">3 / 4</div>
+        <h2>データ保存先の設定</h2>
+        <p>記録をGoogleスプレッドシートに保存します。<br>新規作成するか、既存のIDを入力してください。</p>
+        <button class="btn-secondary" id="btnCreateSheet">📊 新規スプレッドシートを自動作成</button>
+        <div class="divider">または</div>
+        <input type="text" id="inputSheetId" placeholder="既存のスプレッドシートID" class="setup-input">
+        <div class="sheet-status hidden" id="sheetStatus"></div>
+        <button class="btn-primary hidden" id="btnStep3Next">次へ →</button>
+      </div>
+
+      <!-- Step 4: Claude API Key -->
+      <div class="setup-step hidden" id="step4">
+        <div class="step-num">4 / 4</div>
+        <h2>Claude API キーを設定</h2>
+        <p>チャットで話しかけると、自動でルーティンを<br>記録する機能に使います。</p>
+        <a href="https://console.anthropic.com/" target="_blank" class="help-link">APIキーを取得する →</a>
+        <input type="password" id="inputClaudeKey" placeholder="sk-ant-..." class="setup-input">
+        <p class="note">※ APIキーはあなたのブラウザのみに保存され、どこにも送信されません。<br>月の使用料は数十円程度です（Haiku モデル使用）。</p>
+        <button class="btn-primary" id="btnFinishSetup">🚀 アプリを起動する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     メインアプリ
+     ============================================================ -->
+<div id="app" class="hidden">
+
+  <!-- サイドバー -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">📋<span>Daily</span></div>
+    <ul class="nav-list">
+      <li class="nav-item active" data-view="today">
+        <span class="nav-icon">☀️</span><span class="nav-label">今日</span>
+      </li>
+      <li class="nav-item" data-view="routines">
+        <span class="nav-icon">🔄</span><span class="nav-label">ルーティン設定</span>
+      </li>
+      <li class="nav-item" data-view="history">
+        <span class="nav-icon">📈</span><span class="nav-label">履歴・グラフ</span>
+      </li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="user-info" id="userInfo">
+        <div class="user-avatar" id="userAvatar">U</div>
+        <span id="userName">ユーザー</span>
+      </div>
+      <button class="btn-icon" id="btnSettings" title="設定">⚙️</button>
+      <button class="btn-icon" id="btnSync" title="同期">🔄</button>
+    </div>
+  </nav>
+
+  <!-- メインコンテンツ -->
+  <main class="main-content">
+
+    <!-- ===== 今日ビュー ===== -->
+    <section id="todayView" class="view active">
+      <div class="view-header">
+        <div>
+          <h1 id="todayHeading">2026年4月12日（日）</h1>
+          <p class="view-sub" id="todayGreeting">おはようございます！今日も頑張りましょう</p>
+        </div>
+        <div class="score-badge" id="scoreBadge">
+          <div class="score-auto">
+            <span class="score-label">達成率</span>
+            <span class="score-value" id="autoScoreVal">--%</span>
+          </div>
+          <div class="score-divider"></div>
+          <div class="score-self">
+            <span class="score-label">自己評価</span>
+            <div class="star-mini" id="starMini">☆☆☆☆☆</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="today-grid">
+        <!-- ルーティンカード -->
+        <div class="card routines-card">
+          <div class="card-header">
+            <h2>✅ ルーティン</h2>
+            <span class="progress-text" id="routineProgress">0 / 0</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          <ul class="routine-list" id="routineList">
+            <li class="empty-state">ルーティンを設定してください</li>
+          </ul>
+        </div>
+
+        <!-- 今日の予定カード -->
+        <div class="card schedule-card">
+          <div class="card-header">
+            <h2>📅 今日の予定</h2>
+            <button class="btn-small" id="btnSyncCalendar">カレンダー取得</button>
+          </div>
+          <div id="calendarEvents" class="event-list"></div>
+          <div id="manualTasks" class="task-list"></div>
+          <button class="btn-add-task" id="btnAddTask">＋ 予定を手動追加</button>
+        </div>
+      </div>
+
+      <!-- 振り返りカード -->
+      <div class="card eval-card">
+        <h2>🌟 今日の振り返り</h2>
+        <div class="eval-row">
+          <div class="star-rating" id="starRating">
+            <span class="star" data-value="1">★</span>
+            <span class="star" data-value="2">★</span>
+            <span class="star" data-value="3">★</span>
+            <span class="star" data-value="4">★</span>
+            <span class="star" data-value="5">★</span>
+          </div>
+          <textarea id="commentInput" class="comment-input" placeholder="今日の一言コメント（任意）" rows="2"></textarea>
+          <button class="btn-primary btn-save-eval" id="btnSaveEval">保存</button>
+        </div>
+      </div>
+
+      <!-- チャットパネル -->
+      <div class="chat-panel" id="chatPanel">
+        <div class="chat-header" id="chatToggle">
+          <span>💬 チャットで記録する</span>
+          <span class="chat-toggle-icon" id="chatToggleIcon">▲</span>
+        </div>
+        <div class="chat-body" id="chatBody">
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-msg assistant">
+              <div class="msg-bubble">こんにちは！今日やったことを自然な言葉で教えてください。例：「朝ランニングして読書30分やった」</div>
+            </div>
+          </div>
+          <div class="chat-input-row">
+            <textarea id="chatInput" class="chat-input" placeholder="今日やったことを話しかけてみてください..." rows="2"></textarea>
+            <button class="btn-send" id="btnSend">送信</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== ルーティン設定ビュー ===== -->
+    <section id="routinesView" class="view hidden">
+      <div class="view-header">
+        <div>
+          <h1>🔄 ルーティン設定</h1>
+          <p class="view-sub">毎日繰り返すタスクを管理します</p>
+        </div>
+        <button class="btn-primary" id="btnAddRoutine">＋ ルーティンを追加</button>
+      </div>
+
+      <div class="card">
+        <div id="routineSettings" class="routine-settings-list">
+          <div class="empty-state">まだルーティンがありません。上の「追加」ボタンから始めましょう！</div>
+        </div>
+      </div>
+
+      <div class="card categories-card">
+        <h2>カテゴリ別集計（今月）</h2>
+        <div id="categoryStats" class="category-stats"></div>
+      </div>
+    </section>
+
+    <!-- ===== 履歴ビュー ===== -->
+    <section id="historyView" class="view hidden">
+      <div class="view-header">
+        <div>
+          <h1>📈 履歴・グラフ</h1>
+          <p class="view-sub">過去の記録とスコアの推移</p>
+        </div>
+      </div>
+
+      <div class="history-grid">
+        <div class="card chart-card">
+          <h2>スコア推移（直近30日）</h2>
+          <canvas id="scoreChart" width="600" height="200"></canvas>
+        </div>
+        <div class="card streak-card">
+          <h2>🔥 連続達成</h2>
+          <div class="streak-num" id="streakNum">0</div>
+          <div class="streak-label">日連続</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>日別記録</h2>
+        <div id="historyList" class="history-list"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============================================================
+     モーダル群
+     ============================================================ -->
+
+<!-- ルーティン追加モーダル -->
+<div id="routineModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2 id="routineModalTitle">ルーティンを追加</h2>
+    <div class="form-group">
+      <label>名前</label>
+      <input type="text" id="routineName" class="form-input" placeholder="例：朝ランニング">
+    </div>
+    <div class="form-group">
+      <label>カテゴリ</label>
+      <select id="routineCategory" class="form-input">
+        <option value="健康">🏃 健康・運動</option>
+        <option value="学習">📚 学習・読書</option>
+        <option value="メンタル">🧘 メンタル・瞑想</option>
+        <option value="生活">🏠 生活習慣</option>
+        <option value="仕事">💼 仕事・副業</option>
+        <option value="その他">✨ その他</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>目標時間（任意）</label>
+      <input type="text" id="routineDuration" class="form-input" placeholder="例：30分">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btnCancelRoutine">キャンセル</button>
+      <button class="btn-primary" id="btnSaveRoutine">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- タスク追加モーダル -->
+<div id="taskModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>予定を追加</h2>
+    <div class="form-group">
+      <label>内容</label>
+      <input type="text" id="taskName" class="form-input" placeholder="例：歯医者、買い物">
+    </div>
+    <div class="form-group">
+      <label>時間（任意）</label>
+      <input type="time" id="taskTime" class="form-input">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btnCancelTask">キャンセル</button>
+      <button class="btn-primary" id="btnSaveTask">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 設定モーダル -->
+<div id="settingsModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>⚙️ 設定</h2>
+    <div class="form-group">
+      <label>Claude API キー</label>
+      <input type="password" id="settingsClaudeKey" class="form-input">
+    </div>
+    <div class="form-group">
+      <label>Google スプレッドシートID</label>
+      <input type="text" id="settingsSheetId" class="form-input">
+    </div>
+    <div class="form-group">
+      <label>Google Client ID</label>
+      <input type="text" id="settingsClientId" class="form-input">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btnCancelSettings">キャンセル</button>
+      <button class="btn-danger" id="btnResetApp">初期化</button>
+      <button class="btn-primary" id="btnSaveSettings">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- トースト通知 -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- スクリプト読み込み -->
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/sheets.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/claude.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
