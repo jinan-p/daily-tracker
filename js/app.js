@@ -38,13 +38,14 @@ const State = {
 // ユーティリティ
 // ============================================================
 function todayStr() {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 function tomorrowStr() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 function formatDateJP(dateStr) {
@@ -59,7 +60,8 @@ function showToast(msg, type = 'success') {
   toast.className = 'toast ' + type;
   toast.classList.remove('hidden');
   clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(() => toast.classList.add('hidden'), 3000);
+  const duration = type === 'error' ? 8000 : 3000;
+  showToast._timer = setTimeout(() => toast.classList.add('hidden'), duration);
 }
 
 function openModal(id) {
@@ -218,11 +220,22 @@ async function launchApp() {
   renderAll();
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
+
+  // トークンが期限切れなら先に取得（並列リクエストの競合を防ぐ）
+  if (Auth.isExpired()) {
+    try {
+      await Auth.getToken();
+    } catch (e) {
+      showToast('認証が必要です。右下の🔄ボタンを押してください', 'error');
+      return;
+    }
+  }
+
   try {
     await Sheets.ensureTimelineSheet();
     await loadAll();
   } catch (e) {
-    showToast('セッション期限切れ。右下の同期ボタン🔄を押してください', 'error');
+    showToast('読み込みエラー。右下の🔄ボタンを押してください', 'error');
   }
 }
 

@@ -5,6 +5,7 @@
 const Auth = {
   tokenClient: null,
   accessToken: null,
+  _pendingToken: null,
 
   // ------------------------------------------------------------
   // 初期化：Google Identity Services のクライアントを作る
@@ -68,20 +69,22 @@ const Auth = {
   },
 
   // ------------------------------------------------------------
-  // アクセストークンを取得（期限切れなら再認証）
+  // アクセストークンを取得（期限切れなら再認証、並列呼び出し対応）
   // ------------------------------------------------------------
   getToken() {
-    return new Promise((resolve, reject) => {
-      if (this.accessToken && !this.isExpired()) {
-        resolve(this.accessToken);
-        return;
-      }
-      // 期限切れ：サイレント再取得
-      this.signIn(
-        (res) => resolve(res.access_token),
-        (err) => reject(err),
-      );
-    });
+    if (this.accessToken && !this.isExpired()) {
+      return Promise.resolve(this.accessToken);
+    }
+    // 既に取得中なら同じPromiseを返す（並列リクエストの競合を防ぐ）
+    if (!this._pendingToken) {
+      this._pendingToken = new Promise((resolve, reject) => {
+        this.signIn(
+          (res) => { this._pendingToken = null; resolve(res.access_token); },
+          (err) => { this._pendingToken = null; reject(err); },
+        );
+      });
+    }
+    return this._pendingToken;
   },
 
   // ------------------------------------------------------------
