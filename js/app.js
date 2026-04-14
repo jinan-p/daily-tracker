@@ -214,9 +214,16 @@ async function launchApp() {
   document.getElementById('todayLabel').textContent    = '今日 ' + formatDateJP(State.today);
   document.getElementById('tomorrowLabel').textContent = '明日 ' + formatDateJP(State.tomorrow);
 
+  // データ読み込み前に空グリッドを先に表示する
+  renderAll();
+
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
-  await Sheets.ensureTimelineSheet();
-  await loadAll();
+  try {
+    await Sheets.ensureTimelineSheet();
+    await loadAll();
+  } catch (e) {
+    showToast('セッション期限切れ。右下の同期ボタン🔄を押してください', 'error');
+  }
 }
 
 // ============================================================
@@ -249,7 +256,8 @@ async function loadAll() {
     renderAll();
     showToast('読み込み完了 ✅');
   } catch (e) {
-    showToast('読み込みエラー: ' + e.message, 'error');
+    renderAll();
+    showToast('読み込みエラー: ' + e.message + ' — 同期ボタン🔄で再試行', 'error');
   }
 }
 
