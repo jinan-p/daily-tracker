@@ -1,0 +1,21 @@
+# APIキーや認証情報は絶対にここに書かない・コミットしない
+# このアプリのAPIキーはブラウザのlocalStorageにのみ保存されます
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# エディタ設定
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ローカル設定ファイル（作成した場合は除外）
+.env
+.env.local
+*.env
+*credentials*
+*secret*
+*apikey*

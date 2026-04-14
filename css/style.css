@@ -1453,9 +1453,33 @@ body {
 
 .tl-routine  { border-left: 3px solid var(--primary); }
 .tl-calendar { border-left: 3px solid var(--success); }
+.tl-manual   { border-left: 3px solid #F6AD55; }
+.tl-onetime  { border-left: 3px solid #9F7AEA; }
 
 .tl-item-icon { font-size: 14px; flex-shrink: 0; }
 .tl-item-name { flex: 1; color: var(--text); font-weight: 500; }
+
+.tl-score-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-light);
+  border-radius: 99px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tl-score-badge.empty {
+  color: var(--text-light);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  font-weight: 500;
+  opacity: 0;
+}
+
+.tl-item:hover .tl-score-badge.empty { opacity: 1; }
 
 .tl-item-remove {
   background: none;
@@ -1472,3 +1496,131 @@ body {
 
 .tl-item:hover .tl-item-remove { opacity: 1; }
 .tl-item-remove:hover { color: var(--danger); }
+
+/* ============================================================
+   タイムライン手動追加ボタン
+   ============================================================ */
+.tl-add-btn {
+  display: none;
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-light);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  margin-top: 2px;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.tl-zone:hover .tl-add-btn { display: block; }
+.tl-add-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* ============================================================
+   タイムライン列ヘッダーのスコア表示
+   ============================================================ */
+.header-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+/* ============================================================
+   パネルタブ
+   ============================================================ */
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-tab {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+  border-bottom: 2px solid transparent;
+}
+
+.panel-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.panel-tab:hover:not(.active) { color: var(--text); }
+
+/* ============================================================
+   単発タスクカード
+   ============================================================ */
+.onetime-card {
+  border-left-color: #9F7AEA !important;
+}
+
+/* ============================================================
+   スコアピッカー（フローティング）
+   ============================================================ */
+.score-picker {
+  background: var(--card-bg);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 10px 12px;
+  z-index: 9000;
+  min-width: 200px;
+  border: 1px solid var(--border);
+}
+
+.score-picker-label {
+  font-size: 11px;
+  color: var(--text-light);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.score-picker-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.score-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  transition: all 0.15s;
+}
+
+.score-btn:hover { border-color: var(--primary); color: var(--primary); }
+.score-btn.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* ============================================================
+   手動タスクモーダル
+   ============================================================ */
+.modal-slot-label {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 16px;
+  margin-top: -8px;
+}

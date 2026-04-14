@@ -26,12 +26,13 @@ const State = {
   routines:          [],
   today:             '',
   tomorrow:          '',
-  todayTimeline:     [],  // [{itemType, itemId, timeSlot, title}]
+  todayTimeline:     [],  // [{itemType, itemId, timeSlot, title, score}]
   tomorrowTimeline:  [],
   todayCalEvents:    [],
   tomorrowCalEvents: [],
   dragging:          null,
   editRoutineId:     null,
+  panelTab:          'routine',  // 'routine' | 'onetime'
 };
 
 // ============================================================
@@ -299,22 +300,34 @@ function renderAll() {
 }
 
 function renderRoutinesPanel() {
-  const container = document.getElementById('routinesPanel');
-  const active = State.routines.filter(r => r.active);
+  // タブ切り替えボタンを更新
+  document.querySelectorAll('.panel-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === State.panelTab);
+  });
+  document.getElementById('btnAddRoutinePanel').classList.toggle('hidden', State.panelTab !== 'routine');
+  document.getElementById('btnAddOnetimePanel').classList.toggle('hidden', State.panelTab !== 'onetime');
 
-  if (active.length === 0) {
-    container.innerHTML = '<div class="empty-state">ルーティンを追加してください</div>';
+  const container = document.getElementById('routinesPanel');
+  const items = State.panelTab === 'onetime'
+    ? State.routines.filter(r => r.onetime)
+    : State.routines.filter(r => r.active && !r.onetime);
+
+  if (items.length === 0) {
+    container.innerHTML = State.panelTab === 'onetime'
+      ? '<div class="empty-state">単発タスクを追加してください</div>'
+      : '<div class="empty-state">ルーティンを追加してください</div>';
     return;
   }
 
-  container.innerHTML = active.map(r => {
+  const cardType = State.panelTab === 'onetime' ? 'onetime' : 'routine';
+  container.innerHTML = items.map(r => {
     const safeTitle = r.name.replace(/"/g, '&quot;');
     return `
-      <div class="routine-card" draggable="true"
-           data-type="routine" data-id="${r.id}"
+      <div class="routine-card ${State.panelTab === 'onetime' ? 'onetime-card' : ''}" draggable="true"
+           data-type="${cardType}" data-id="${r.id}"
            data-slot="unplaced" data-date="unplaced"
            data-title="${safeTitle}">
-        <span class="routine-card-icon">${CATEGORY_ICONS[r.category] || '📌'}</span>
+        <span class="routine-card-icon">${State.panelTab === 'onetime' ? '⚡' : (CATEGORY_ICONS[r.category] || '📌')}</span>
         <span class="routine-card-name">${r.name}</span>
         ${r.duration ? `<span class="routine-card-meta">${r.duration}</span>` : ''}
       </div>`;
@@ -326,8 +339,26 @@ function renderRoutinesPanel() {
   });
 }
 
+// 日別合計点を計算
+function calcDayScore(timeline) {
+  return timeline.reduce((sum, item) => {
+    return sum + (item.score !== null && item.score !== undefined ? item.score : 0);
+  }, 0);
+}
+
 function renderTimeline(containerId, timeline, date) {
   const container = document.getElementById(containerId);
+
+  // ヘッダーの合計点を更新
+  const labelId = containerId === 'todayTimeline' ? 'todayLabel' : 'tomorrowLabel';
+  const prefix  = containerId === 'todayTimeline'
+    ? '今日 ' + formatDateJP(State.today)
+    : '明日 ' + formatDateJP(State.tomorrow);
+  const totalScore = calcDayScore(timeline);
+  const scoredItems = timeline.filter(i => i.score !== null && i.score !== undefined);
+  const scoreText = scoredItems.length > 0 ? `　合計: ${totalScore}点` : '';
+  document.getElementById(labelId).innerHTML =
+    `${prefix}<span class="header-score">${scoreText}</span>`;
 
   container.innerHTML = TIME_SLOTS.map(slot => {
     const isHour = slot.endsWith(':00');
@@ -337,7 +368,10 @@ function renderTimeline(containerId, timeline, date) {
     return `
       <div class="tl-slot ${isHour ? 'tl-hour' : ''}">
         <div class="tl-time">${slot}</div>
-        <div class="tl-zone" data-time="${slot}" data-date="${date}">${itemsHtml}</div>
+        <div class="tl-zone" data-time="${slot}" data-date="${date}">
+          ${itemsHtml}
+          <button class="tl-add-btn" data-slot="${slot}" data-date="${date}" title="手動タスクを追加">＋</button>
+        </div>
       </div>`;
   }).join('');
 
@@ -350,6 +384,11 @@ function renderTimeline(containerId, timeline, date) {
   container.querySelectorAll('.tl-item').forEach(el => {
     el.addEventListener('dragstart', onItemDragStart);
     el.addEventListener('dragend',   onItemDragEnd);
+    el.addEventListener('click', e => {
+      if (e.target.closest('.tl-item-remove')) return;
+      e.stopPropagation();
+      openScorePicker(el.dataset.id, el.dataset.slot, el.dataset.date, el);
+    });
   });
 
   container.querySelectorAll('.tl-item-remove').forEach(btn => {
@@ -358,12 +397,30 @@ function renderTimeline(containerId, timeline, date) {
       removeTimelineItem(btn.dataset.id, btn.dataset.slot, btn.dataset.date);
     });
   });
+
+  container.querySelectorAll('.tl-add-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      openManualTaskModal(btn.dataset.slot, btn.dataset.date);
+    });
+  });
 }
 
 function renderTlItem(item, date) {
-  const icon = item.itemType === 'calendar' ? '📅' : getRoutineIcon(item.itemId);
-  const cls  = item.itemType === 'calendar' ? 'tl-calendar' : 'tl-routine';
+  let icon, cls;
+  if (item.itemType === 'calendar') {
+    icon = '📅'; cls = 'tl-calendar';
+  } else if (item.itemType === 'manual') {
+    icon = '✏️'; cls = 'tl-manual';
+  } else if (item.itemType === 'onetime') {
+    icon = '⚡'; cls = 'tl-onetime';
+  } else {
+    icon = getRoutineIcon(item.itemId); cls = 'tl-routine';
+  }
   const safe = item.title.replace(/"/g, '&quot;');
+  const scoreLabel = item.score !== null && item.score !== undefined
+    ? `<span class="tl-score-badge">${item.score}点</span>`
+    : `<span class="tl-score-badge empty">採点</span>`;
 
   return `
     <div class="tl-item ${cls}" draggable="true"
@@ -372,6 +429,7 @@ function renderTlItem(item, date) {
          data-title="${safe}">
       <span class="tl-item-icon">${icon}</span>
       <span class="tl-item-name">${item.title}</span>
+      ${scoreLabel}
       <button class="tl-item-remove"
               data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}">✕</button>
     </div>`;
@@ -436,7 +494,13 @@ function onSlotDrop(e) {
 
   // 新しい位置に追加
   const targetTl = toDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
-  targetTl.push({ itemType, itemId, timeSlot: toSlot, title });
+  targetTl.push({ itemType, itemId, timeSlot: toSlot, title, score: null });
+
+  // 単発タスクはパネルから削除
+  if (fromDate === 'unplaced' && itemType === 'onetime') {
+    State.routines = State.routines.filter(r => r.id !== itemId);
+    Sheets.saveAllRoutines(State.routines).catch(() => {});
+  }
 
   State.dragging = null;
   renderAll();
@@ -476,6 +540,92 @@ function scheduleSave(date) {
       showToast('保存に失敗しました', 'error');
     }
   }, 1500);
+}
+
+// ============================================================
+// スコアピッカー
+// ============================================================
+function openScorePicker(itemId, slot, date, anchorEl) {
+  // 既存のピッカーを閉じる
+  closeScorePicker();
+
+  const tl  = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+  const item = tl.find(i => i.itemId === itemId && i.timeSlot === slot);
+  if (!item) return;
+
+  const picker = document.createElement('div');
+  picker.id = 'scorePicker';
+  picker.className = 'score-picker';
+  picker.innerHTML = `
+    <div class="score-picker-label">点数を選択（0〜5点）</div>
+    <div class="score-picker-btns">
+      ${[0,1,2,3,4,5].map(n => `
+        <button class="score-btn ${item.score === n ? 'selected' : ''}" data-score="${n}">${n}</button>
+      `).join('')}
+    </div>
+  `;
+
+  picker.querySelectorAll('.score-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const score = parseInt(btn.dataset.score, 10);
+      item.score = score;
+      renderAll();
+      scheduleSave(date);
+      closeScorePicker();
+    });
+  });
+
+  // アンカー要素の直下に配置
+  const rect = anchorEl.getBoundingClientRect();
+  picker.style.position = 'fixed';
+  picker.style.top  = (rect.bottom + 4) + 'px';
+  picker.style.left = rect.left + 'px';
+  document.body.appendChild(picker);
+
+  // 画面外にはみ出す場合は上に出す
+  const pr = picker.getBoundingClientRect();
+  if (pr.bottom > window.innerHeight - 8) {
+    picker.style.top = (rect.top - pr.height - 4) + 'px';
+  }
+
+  // 外クリックで閉じる
+  setTimeout(() => document.addEventListener('click', closeScorePicker, { once: true }), 0);
+}
+
+function closeScorePicker() {
+  const el = document.getElementById('scorePicker');
+  if (el) el.remove();
+}
+
+// ============================================================
+// 手動タスクモーダル
+// ============================================================
+function openManualTaskModal(slot, date) {
+  document.getElementById('manualTaskSlot').value  = slot;
+  document.getElementById('manualTaskDate').value  = date;
+  document.getElementById('manualTaskTitle').value = '';
+  const label = date === State.today
+    ? `今日 ${formatDateJP(State.today)} ${slot}`
+    : `明日 ${formatDateJP(State.tomorrow)} ${slot}`;
+  document.getElementById('manualTaskSlotLabel').textContent = label;
+  openModal('manualTaskModal');
+  setTimeout(() => document.getElementById('manualTaskTitle').focus(), 50);
+}
+
+function addManualTask() {
+  const title = document.getElementById('manualTaskTitle').value.trim();
+  const slot  = document.getElementById('manualTaskSlot').value;
+  const date  = document.getElementById('manualTaskDate').value;
+  if (!title) { showToast('タスク名を入力してください', 'error'); return; }
+
+  const id = 'manual_' + genId();
+  const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+  tl.push({ itemType: 'manual', itemId: id, timeSlot: slot, title, score: null });
+
+  closeModal('manualTaskModal');
+  renderAll();
+  scheduleSave(date);
 }
 
 // ============================================================
@@ -525,12 +675,15 @@ async function toggleRoutineActive(routineId, active) {
   catch { showToast('保存に失敗しました', 'error'); }
 }
 
-function openAddRoutine() {
+function openAddRoutine(isOnetime = false) {
   State.editRoutineId = null;
-  document.getElementById('routineModalTitle').textContent = 'ルーティンを追加';
+  document.getElementById('routineModalTitle').textContent = isOnetime ? '単発タスクを追加' : 'ルーティンを追加';
   document.getElementById('routineName').value     = '';
   document.getElementById('routineCategory').value = '健康';
   document.getElementById('routineDuration').value = '';
+  document.getElementById('routineOnetimeFlag').value = isOnetime ? '1' : '0';
+  // 単発タスクはカテゴリ不要なので非表示
+  document.getElementById('routineCategoryGroup').style.display = isOnetime ? 'none' : '';
   openModal('routineModal');
 }
 
@@ -549,13 +702,14 @@ async function saveRoutine() {
   const name     = document.getElementById('routineName').value.trim();
   const category = document.getElementById('routineCategory').value;
   const duration = document.getElementById('routineDuration').value.trim();
+  const isOnetime = document.getElementById('routineOnetimeFlag').value === '1';
   if (!name) { showToast('名前を入力してください', 'error'); return; }
 
   if (State.editRoutineId) {
     const r = State.routines.find(r => r.id === State.editRoutineId);
     if (r) { r.name = name; r.category = category; r.duration = duration; }
   } else {
-    State.routines.push({ id: genId(), name, category, duration, active: true, order: State.routines.length });
+    State.routines.push({ id: genId(), name, category, duration, active: true, order: State.routines.length, onetime: isOnetime });
   }
 
   closeModal('routineModal');
@@ -633,11 +787,27 @@ document.addEventListener('DOMContentLoaded', () => {
   panelWrap.addEventListener('dragleave', () => panelWrap.classList.remove('drag-over'));
   panelWrap.addEventListener('drop', onPanelDrop);
 
+  // パネルタブ切り替え
+  document.querySelectorAll('.panel-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      State.panelTab = btn.dataset.tab;
+      renderRoutinesPanel();
+    });
+  });
+
   // ルーティン追加ボタン
-  document.getElementById('btnAddRoutinePanel').addEventListener('click', openAddRoutine);
-  document.getElementById('btnAddRoutine').addEventListener('click', openAddRoutine);
+  document.getElementById('btnAddRoutinePanel').addEventListener('click', () => openAddRoutine(false));
+  document.getElementById('btnAddOnetimePanel').addEventListener('click', () => openAddRoutine(true));
+  document.getElementById('btnAddRoutine').addEventListener('click', () => openAddRoutine(false));
   document.getElementById('btnCancelRoutine').addEventListener('click', () => closeModal('routineModal'));
   document.getElementById('btnSaveRoutine').addEventListener('click', saveRoutine);
+
+  // 手動タスクモーダル
+  document.getElementById('btnCancelManualTask').addEventListener('click', () => closeModal('manualTaskModal'));
+  document.getElementById('btnSaveManualTask').addEventListener('click', addManualTask);
+  document.getElementById('manualTaskTitle').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addManualTask();
+  });
 
   // 設定
   document.getElementById('btnSettings').addEventListener('click', openSettings);

@@ -141,7 +141,7 @@ const Sheets = {
   // ============================================================
 
   async getRoutines() {
-    const rows = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:F1000`);
+    const rows = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:G1000`);
     return rows.map(r => ({
       id:       r[0] || '',
       name:     r[1] || '',
@@ -149,16 +149,17 @@ const Sheets = {
       duration: r[3] || '',
       active:   r[4] !== 'FALSE',
       order:    parseInt(r[5] || '0', 10),
+      onetime:  r[6] === 'TRUE',
     })).sort((a, b) => a.order - b.order);
   },
 
   async saveAllRoutines(routines) {
     // 全行を上書き（順序保証）
     const values = routines.map((r, i) => [
-      r.id, r.name, r.category, r.duration, r.active ? 'TRUE' : 'FALSE', i,
+      r.id, r.name, r.category, r.duration, r.active ? 'TRUE' : 'FALSE', i, r.onetime ? 'TRUE' : 'FALSE',
     ]);
     // まず既存をクリア（ヘッダー行除く）
-    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.ROUTINES + '!A2:F1000')}:clear`;
+    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.ROUTINES + '!A2:G1000')}:clear`;
     await this._req(clearUrl, { method: 'POST', body: '{}' });
     if (values.length > 0) {
       await this._write(`${CONFIG.SHEET.ROUTINES}!A2`, values);
@@ -266,7 +267,7 @@ const Sheets = {
   // ============================================================
 
   async getTimeline(date) {
-    const rows = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:E10000`);
+    const rows = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
     return rows
       .filter(r => r[0] === date)
       .map(r => ({
@@ -275,16 +276,20 @@ const Sheets = {
         itemId:   r[2] || '',
         timeSlot: r[3] || 'unplaced',
         title:    r[4] || '',
+        score:    r[5] !== undefined && r[5] !== '' ? parseInt(r[5], 10) : null,
       }));
   },
 
   async saveTimeline(date, items) {
-    const all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:E10000`);
+    const all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
     const others = all.filter(r => r[0] !== date);
-    const dateRows = items.map(item => [date, item.itemType, item.itemId, item.timeSlot, item.title]);
+    const dateRows = items.map(item => [
+      date, item.itemType, item.itemId, item.timeSlot, item.title,
+      item.score !== null && item.score !== undefined ? item.score : '',
+    ]);
     const newAll = [...others, ...dateRows];
 
-    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.TIMELINE + '!A2:E10000')}:clear`;
+    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.TIMELINE + '!A2:F10000')}:clear`;
     await this._req(clearUrl, { method: 'POST', body: '{}' });
     if (newAll.length > 0) {
       await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll);

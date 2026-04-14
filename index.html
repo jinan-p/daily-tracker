@@ -102,9 +102,14 @@
 
         <!-- 左パネル: ルーティン一覧 -->
         <div class="routines-panel-wrap" id="routinesPanelWrap">
+          <div class="panel-tabs">
+            <button class="panel-tab active" data-tab="routine">ルーティン</button>
+            <button class="panel-tab" data-tab="onetime">単発</button>
+          </div>
           <div class="panel-header">
-            <span class="panel-title">🔄 ルーティン</span>
+            <span class="panel-title" id="panelTitle">🔄 ルーティン</span>
             <button class="btn-panel-add" id="btnAddRoutinePanel" title="ルーティンを追加">＋</button>
+            <button class="btn-panel-add btn-panel-add-onetime hidden" id="btnAddOnetimePanel" title="単発タスクを追加">＋</button>
           </div>
           <div id="routinesPanel" class="routines-panel-list">
             <div class="empty-state">ルーティンを追加してください</div>
@@ -156,11 +161,12 @@
 <div id="routineModal" class="modal-overlay hidden">
   <div class="modal-box">
     <h2 id="routineModalTitle">ルーティンを追加</h2>
+    <input type="hidden" id="routineOnetimeFlag" value="0">
     <div class="form-group">
       <label>名前</label>
       <input type="text" id="routineName" class="form-input" placeholder="例：朝ランニング">
     </div>
-    <div class="form-group">
+    <div class="form-group" id="routineCategoryGroup">
       <label>カテゴリ</label>
       <select id="routineCategory" class="form-input">
         <option value="健康">🏃 健康・運動</option>
@@ -178,6 +184,24 @@
     <div class="modal-actions">
       <button class="btn-secondary" id="btnCancelRoutine">キャンセル</button>
       <button class="btn-primary" id="btnSaveRoutine">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 手動タスク追加モーダル -->
+<div id="manualTaskModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h2>✏️ 手動タスクを追加</h2>
+    <p class="modal-slot-label" id="manualTaskSlotLabel"></p>
+    <input type="hidden" id="manualTaskSlot">
+    <input type="hidden" id="manualTaskDate">
+    <div class="form-group">
+      <label>タスク名</label>
+      <input type="text" id="manualTaskTitle" class="form-input" placeholder="例：資料作成">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btnCancelManualTask">キャンセル</button>
+      <button class="btn-primary" id="btnSaveManualTask">追加</button>
     </div>
   </div>
 </div>
