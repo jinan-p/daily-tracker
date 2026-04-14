@@ -222,14 +222,10 @@ async function launchApp() {
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
 
-  // トークンが期限切れなら先に取得（並列リクエストの競合を防ぐ）
+  // トークンが期限切れの場合はユーザー操作を促すだけ（自動ポップアップはブラウザにブロックされる）
   if (Auth.isExpired()) {
-    try {
-      await Auth.getToken();
-    } catch (e) {
-      showToast('認証が必要です。右下の🔄ボタンを押してください', 'error');
-      return;
-    }
+    showToast('右下の🔄ボタンを押してGoogleにサインインしてください', 'error');
+    return;
   }
 
   try {
@@ -244,13 +240,12 @@ async function launchApp() {
 // データ読み込み
 // ============================================================
 async function loadAll() {
-  // トークンが期限切れなら先に取得（ポップアップの競合を防ぐ）
+  // トークンが期限切れの場合は再認証してから進む（🔄ボタン経由なのでポップアップOK）
   if (Auth.isExpired()) {
     try {
       await Auth.getToken();
     } catch (e) {
-      showToast('認証が必要です。右下の🔄ボタンを押してください', 'error');
-      renderAll();
+      showToast('認証に失敗しました。もう一度🔄を押してください', 'error');
       return;
     }
   }
