@@ -265,7 +265,10 @@ async function loadAll() {
       State.tomorrowCalEvents = tomorrowCal;
       mergeCalEvents(State.todayTimeline,    todayCal);
       mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
-    } catch {}
+    } catch (calErr) {
+      console.warn('カレンダー取得エラー:', calErr);
+      showToast('カレンダー取得失敗: ' + calErr.message, 'error');
+    }
 
     renderAll();
     showToast('読み込み完了 ✅');
