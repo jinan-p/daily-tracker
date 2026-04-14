@@ -1,44 +1,62 @@
 // ============================================================
-// app.js — メインアプリロジック
+// app.js — タイムラインアプリロジック
 // ============================================================
 
 // ============================================================
-// アプリの状態（State）
+// 定数
+// ============================================================
+const TIME_SLOTS = (() => {
+  const slots = [];
+  for (let h = 5; h <= 21; h++) {
+    slots.push(String(h).padStart(2, '0') + ':00');
+    slots.push(String(h).padStart(2, '0') + ':30');
+  }
+  return slots; // 34スロット: 05:00, 05:30 ... 21:00, 21:30
+})();
+
+const CATEGORY_ICONS = {
+  '健康': '🏃', '学習': '📚', 'メンタル': '🧘',
+  '生活': '🏠', '仕事': '💼', 'その他': '✨',
+};
+
+// ============================================================
+// 状態
 // ============================================================
 const State = {
-  routines:     [],   // ルーティンマスタ
-  dailyLog:     [],   // 今日のチェック状態
-  manualTasks:  [],   // 今日の手動タスク
-  calEvents:    [],   // Googleカレンダーイベント
-  selfScore:    0,
-  comment:      '',
-  editRoutineId: null,  // 編集中のルーティンID
-  today:        '',
-  chatCollapsed: false,
+  routines:          [],
+  today:             '',
+  tomorrow:          '',
+  todayTimeline:     [],  // [{itemType, itemId, timeSlot, title}]
+  tomorrowTimeline:  [],
+  todayCalEvents:    [],
+  tomorrowCalEvents: [],
+  dragging:          null,
+  editRoutineId:     null,
 };
 
 // ============================================================
 // ユーティリティ
 // ============================================================
-
 function todayStr() {
   return new Date().toISOString().split('T')[0];
 }
 
-function formatDateJP(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const days = ['日','月','火','水','木','金','土'];
-  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${days[d.getDay()]}）`;
+function tomorrowStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
 }
 
-function genId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function formatDateJP(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const days = ['日', '月', '火', '水', '木', '金', '土'];
+  return `${d.getMonth() + 1}/${d.getDate()}（${days[d.getDay()]}）`;
 }
 
 function showToast(msg, type = 'success') {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
-  toast.className   = `toast ${type}`;
+  toast.className = 'toast ' + type;
   toast.classList.remove('hidden');
   clearTimeout(showToast._timer);
   showToast._timer = setTimeout(() => toast.classList.add('hidden'), 3000);
@@ -54,18 +72,28 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('active');
 }
 
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 6)  return 'おはようございます（早起き偉い！）';
-  if (h < 12) return 'おはようございます！今日も頑張りましょう☀️';
-  if (h < 18) return 'こんにちは！今日の調子はいかがですか？';
-  return 'お疲れ様です！今日を振り返りましょう🌙';
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function getRoutineIcon(routineId) {
+  const r = State.routines.find(r => r.id === routineId);
+  return r ? (CATEGORY_ICONS[r.category] || '📌') : '📌';
+}
+
+// カレンダーの時刻を 30 分単位スロットに丸める
+function roundToSlot(timeStr) {
+  if (!timeStr || timeStr === '終日') return null;
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || h < 5 || h > 21) return null;
+  const roundedM = m >= 30 ? 30 : 0;
+  const slot = String(h).padStart(2, '0') + ':' + String(roundedM).padStart(2, '0');
+  return TIME_SLOTS.includes(slot) ? slot : null;
 }
 
 // ============================================================
 // Google Identity Services のロード待ち
 // ============================================================
-
 function waitForGoogle(callback) {
   if (typeof google !== 'undefined' && google.accounts) {
     callback();
@@ -77,9 +105,7 @@ function waitForGoogle(callback) {
 // ============================================================
 // セットアップ画面
 // ============================================================
-
 function initSetup() {
-  // ヘルプリンク
   document.getElementById('showClientIdHelp').addEventListener('click', e => {
     e.preventDefault();
     document.getElementById('clientIdHelp').classList.toggle('hidden');
@@ -96,14 +122,13 @@ function initSetup() {
     });
   });
 
-  // Step 2: Googleサインイン
+  // Step 2: Google サインイン
   document.getElementById('btnGoogleSignIn').addEventListener('click', () => {
     Auth.signIn(
       async (res) => {
-        // ユーザー情報取得
         try {
           const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { 'Authorization': `Bearer ${res.access_token}` },
+            headers: { 'Authorization': 'Bearer ' + res.access_token },
           }).then(r => r.json());
           Store.set(CONFIG.LS.USER_NAME,  info.name  || '');
           Store.set(CONFIG.LS.USER_EMAIL, info.email || '');
@@ -111,7 +136,7 @@ function initSetup() {
         document.getElementById('authStatus').classList.remove('hidden');
         document.getElementById('btnStep2Next').classList.remove('hidden');
       },
-      (err) => showToast(`認証エラー: ${err}`, 'error'),
+      (err) => showToast('認証エラー: ' + err, 'error'),
     );
   });
 
@@ -126,7 +151,7 @@ function initSetup() {
       const sheetId = await Sheets.createNewSheet('Daily Tracker データ');
       Store.set(CONFIG.LS.SHEET_ID, sheetId);
       const status = document.getElementById('sheetStatus');
-      status.textContent = `✅ 作成完了！ID: ${sheetId}`;
+      status.textContent = '✅ 作成完了！ID: ' + sheetId;
       status.className = 'sheet-status success';
       status.classList.remove('hidden');
       document.getElementById('btnStep3Next').classList.remove('hidden');
@@ -143,6 +168,7 @@ function initSetup() {
     document.getElementById('btnStep3Next').classList.toggle('hidden', !val);
   });
 
+  // Step 3 完了 → アプリ起動
   document.getElementById('btnStep3Next').addEventListener('click', async () => {
     const inputId = document.getElementById('inputSheetId').value.trim();
     if (inputId) Store.set(CONFIG.LS.SHEET_ID, inputId);
@@ -154,14 +180,6 @@ function initSetup() {
     } catch (e) {
       showToast(e.message, 'error'); return;
     }
-    showStep('step4');
-  });
-
-  // Step 4: Claude APIキー
-  document.getElementById('btnFinishSetup').addEventListener('click', () => {
-    const key = document.getElementById('inputClaudeKey').value.trim();
-    if (!key) { showToast('Claude APIキーを入力してください', 'error'); return; }
-    Store.set(CONFIG.LS.CLAUDE_KEY, key);
     Store.set(CONFIG.LS.SETUP_DONE, '1');
     launchApp();
   });
@@ -180,317 +198,272 @@ function showStep(stepId) {
 // ============================================================
 // アプリ起動
 // ============================================================
-
 async function launchApp() {
-  document.getElementById('setupModal').classList.remove('active');
   document.getElementById('setupModal').classList.add('hidden');
+  document.getElementById('setupModal').classList.remove('active');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('app').classList.add('active');
 
-  // ユーザー表示
   const name = Store.get(CONFIG.LS.USER_NAME) || 'ユーザー';
   document.getElementById('userName').textContent   = name;
   document.getElementById('userAvatar').textContent = name[0] || 'U';
 
-  // 今日の日付
-  State.today = todayStr();
-  document.getElementById('todayHeading').textContent = formatDateJP(State.today);
-  document.getElementById('todayGreeting').textContent = getGreeting();
+  State.today    = todayStr();
+  State.tomorrow = tomorrowStr();
 
-  // Sheetsを初期化
+  document.getElementById('todayLabel').textContent    = '今日 ' + formatDateJP(State.today);
+  document.getElementById('tomorrowLabel').textContent = '明日 ' + formatDateJP(State.tomorrow);
+
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
-
-  // 今日のデータを読み込む
-  await loadTodayData();
+  await Sheets.ensureTimelineSheet();
+  await loadAll();
 }
 
 // ============================================================
-// 今日のデータを読み込む
+// データ読み込み
 // ============================================================
-
-async function loadTodayData() {
+async function loadAll() {
   try {
-    const [routines, log, tasks, evalData] = await Promise.all([
+    const [routines, todayTl, tomorrowTl] = await Promise.all([
       Sheets.getRoutines(),
-      Sheets.getDailyLog(State.today),
-      Sheets.getManualTasks(State.today),
-      Sheets.getSelfEval(State.today),
+      Sheets.getTimeline(State.today),
+      Sheets.getTimeline(State.tomorrow),
     ]);
 
-    State.routines    = routines;
-    State.dailyLog    = log;
-    State.manualTasks = tasks;
+    State.routines        = routines;
+    State.todayTimeline   = todayTl;
+    State.tomorrowTimeline = tomorrowTl;
 
-    if (evalData) {
-      State.selfScore = evalData.selfScore;
-      State.comment   = evalData.comment;
-    }
+    // カレンダーを自動取得（失敗しても続行）
+    try {
+      const [todayCal, tomorrowCal] = await Promise.all([
+        Calendar.getEvents(State.today),
+        Calendar.getEvents(State.tomorrow),
+      ]);
+      State.todayCalEvents    = todayCal;
+      State.tomorrowCalEvents = tomorrowCal;
+      mergeCalEvents(State.todayTimeline,    todayCal);
+      mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+    } catch {}
 
-    renderRoutines();
-    renderManualTasks();
-    renderEval();
-    updateScore();
-    renderRoutineSettings();
+    renderAll();
+    showToast('読み込み完了 ✅');
   } catch (e) {
-    showToast(`データ読み込みエラー: ${e.message}`, 'error');
+    showToast('読み込みエラー: ' + e.message, 'error');
+  }
+}
+
+// カレンダーイベントをタイムラインへ自動配置（未配置のものだけ）
+function mergeCalEvents(timeline, calEvents) {
+  const existingIds = timeline
+    .filter(item => item.itemType === 'calendar')
+    .map(item => item.itemId);
+
+  for (const event of calEvents) {
+    if (existingIds.includes(event.id)) continue;
+    const slot = roundToSlot(event.time);
+    if (!slot) continue;
+    timeline.push({ itemType: 'calendar', itemId: event.id, timeSlot: slot, title: event.title });
   }
 }
 
 // ============================================================
-// 今日ビュー: ルーティン
+// レンダリング
 // ============================================================
+function renderAll() {
+  renderRoutinesPanel();
+  renderTimeline('todayTimeline',    State.todayTimeline,    State.today);
+  renderTimeline('tomorrowTimeline', State.tomorrowTimeline, State.tomorrow);
+  renderRoutineSettings();
+}
 
-function renderRoutines() {
-  const list = document.getElementById('routineList');
+function renderRoutinesPanel() {
+  const container = document.getElementById('routinesPanel');
   const active = State.routines.filter(r => r.active);
 
   if (active.length === 0) {
-    list.innerHTML = '<li class="empty-state">ルーティンを設定してください</li>';
+    container.innerHTML = '<div class="empty-state">ルーティンを追加してください</div>';
     return;
   }
 
-  list.innerHTML = active.map(r => {
-    const logEntry = State.dailyLog.find(l => l.routineId === r.id);
-    const done     = logEntry?.completed || false;
+  container.innerHTML = active.map(r => {
+    const safeTitle = r.name.replace(/"/g, '&quot;');
     return `
-      <li class="routine-item ${done ? 'done' : ''}" data-id="${r.id}">
-        <div class="routine-checkbox">${done ? '✓' : ''}</div>
-        <div class="routine-info">
-          <div class="routine-name">${r.name}</div>
-          ${r.duration ? `<div class="routine-meta">⏱ ${r.duration}</div>` : ''}
-        </div>
-        <span class="routine-category-tag">${r.category}</span>
-      </li>`;
+      <div class="routine-card" draggable="true"
+           data-type="routine" data-id="${r.id}"
+           data-slot="unplaced" data-date="unplaced"
+           data-title="${safeTitle}">
+        <span class="routine-card-icon">${CATEGORY_ICONS[r.category] || '📌'}</span>
+        <span class="routine-card-name">${r.name}</span>
+        ${r.duration ? `<span class="routine-card-meta">${r.duration}</span>` : ''}
+      </div>`;
   }).join('');
 
-  // チェックのクリックイベント
-  list.querySelectorAll('.routine-item').forEach(el => {
-    el.addEventListener('click', () => toggleRoutine(el.dataset.id));
-  });
-
-  updateScore();
-}
-
-async function toggleRoutine(routineId) {
-  const existing = State.dailyLog.find(l => l.routineId === routineId);
-  if (existing) {
-    existing.completed = !existing.completed;
-  } else {
-    State.dailyLog.push({ date: State.today, routineId, completed: true });
-  }
-  renderRoutines();
-  updateScore();
-
-  try {
-    await Sheets.saveDailyLog(State.today, State.dailyLog);
-  } catch (e) {
-    showToast('保存に失敗しました', 'error');
-  }
-}
-
-// ============================================================
-// 今日ビュー: カレンダーイベント
-// ============================================================
-
-async function loadCalendarEvents() {
-  const btn = document.getElementById('btnSyncCalendar');
-  btn.textContent = '取得中...';
-  btn.disabled = true;
-  try {
-    State.calEvents = await Calendar.getEvents(State.today);
-    renderCalendarEvents();
-    showToast('カレンダーを取得しました');
-  } catch (e) {
-    showToast(`カレンダーエラー: ${e.message}`, 'error');
-  } finally {
-    btn.textContent = 'カレンダー取得';
-    btn.disabled = false;
-  }
-}
-
-function renderCalendarEvents() {
-  const container = document.getElementById('calendarEvents');
-  if (State.calEvents.length === 0) {
-    container.innerHTML = '<div style="font-size:12px;color:var(--text-light);padding:4px 0">Googleカレンダーの予定はありません</div>';
-    return;
-  }
-  container.innerHTML = State.calEvents.map(e => `
-    <div class="event-item">
-      <span class="event-time">${e.time}</span>
-      <span class="event-title">${e.title}</span>
-    </div>`).join('');
-}
-
-// ============================================================
-// 今日ビュー: 手動タスク
-// ============================================================
-
-function renderManualTasks() {
-  const container = document.getElementById('manualTasks');
-  if (State.manualTasks.length === 0) {
-    container.innerHTML = '';
-    return;
-  }
-  container.innerHTML = State.manualTasks.map(t => `
-    <div class="task-item ${t.completed ? 'done' : ''}" data-id="${t.id}">
-      <div class="task-check" data-id="${t.id}">${t.completed ? '✓' : ''}</div>
-      <span class="task-time">${t.time || ''}</span>
-      <span class="task-name">${t.name}</span>
-      <button class="task-delete" data-id="${t.id}">✕</button>
-    </div>`).join('');
-
-  container.querySelectorAll('.task-check').forEach(el => {
-    el.addEventListener('click', () => toggleManualTask(el.dataset.id));
-  });
-  container.querySelectorAll('.task-delete').forEach(el => {
-    el.addEventListener('click', () => deleteManualTask(el.dataset.id));
+  container.querySelectorAll('.routine-card').forEach(el => {
+    el.addEventListener('dragstart', onItemDragStart);
+    el.addEventListener('dragend',   onItemDragEnd);
   });
 }
 
-async function toggleManualTask(taskId) {
-  const task = State.manualTasks.find(t => t.id === taskId);
-  if (!task) return;
-  task.completed = !task.completed;
-  renderManualTasks();
-  try {
-    await Sheets.updateManualTask(taskId, task.completed);
-  } catch (e) {
-    showToast('保存に失敗しました', 'error');
-  }
-}
+function renderTimeline(containerId, timeline, date) {
+  const container = document.getElementById(containerId);
 
-async function deleteManualTask(taskId) {
-  State.manualTasks = State.manualTasks.filter(t => t.id !== taskId);
-  renderManualTasks();
-  try {
-    await Sheets.deleteManualTask(taskId);
-  } catch (e) {
-    showToast('削除に失敗しました', 'error');
-  }
-}
+  container.innerHTML = TIME_SLOTS.map(slot => {
+    const isHour = slot.endsWith(':00');
+    const items  = timeline.filter(item => item.timeSlot === slot);
+    const itemsHtml = items.map(item => renderTlItem(item, date)).join('');
 
-// ============================================================
-// 今日ビュー: スコア更新
-// ============================================================
+    return `
+      <div class="tl-slot ${isHour ? 'tl-hour' : ''}">
+        <div class="tl-time">${slot}</div>
+        <div class="tl-zone" data-time="${slot}" data-date="${date}">${itemsHtml}</div>
+      </div>`;
+  }).join('');
 
-function updateScore() {
-  const active = State.routines.filter(r => r.active);
-  const done   = active.filter(r => State.dailyLog.find(l => l.routineId === r.id && l.completed));
-  const total  = active.length;
-  const pct    = total > 0 ? Math.round((done.length / total) * 100) : 0;
-
-  document.getElementById('autoScoreVal').textContent  = `${pct}%`;
-  document.getElementById('progressFill').style.width  = `${pct}%`;
-  document.getElementById('routineProgress').textContent = `${done.length} / ${total}`;
-
-  // 星ミニ表示
-  const stars = State.selfScore;
-  document.getElementById('starMini').textContent = '★'.repeat(stars) + '☆'.repeat(5 - stars);
-}
-
-// ============================================================
-// 今日ビュー: 振り返り（自己評価）
-// ============================================================
-
-function renderEval() {
-  // 星の表示
-  document.querySelectorAll('.star').forEach(el => {
-    const val = parseInt(el.dataset.value, 10);
-    el.classList.toggle('active', val <= State.selfScore);
+  container.querySelectorAll('.tl-zone').forEach(zone => {
+    zone.addEventListener('dragover',  onSlotDragOver);
+    zone.addEventListener('dragleave', onSlotDragLeave);
+    zone.addEventListener('drop',      onSlotDrop);
   });
-  document.getElementById('commentInput').value = State.comment;
+
+  container.querySelectorAll('.tl-item').forEach(el => {
+    el.addEventListener('dragstart', onItemDragStart);
+    el.addEventListener('dragend',   onItemDragEnd);
+  });
+
+  container.querySelectorAll('.tl-item-remove').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      removeTimelineItem(btn.dataset.id, btn.dataset.slot, btn.dataset.date);
+    });
+  });
 }
 
-async function saveEval() {
-  const active = State.routines.filter(r => r.active);
-  const done   = active.filter(r => State.dailyLog.find(l => l.routineId === r.id && l.completed));
-  const autoScore = active.length > 0 ? Math.round((done.length / active.length) * 100) : 0;
+function renderTlItem(item, date) {
+  const icon = item.itemType === 'calendar' ? '📅' : getRoutineIcon(item.itemId);
+  const cls  = item.itemType === 'calendar' ? 'tl-calendar' : 'tl-routine';
+  const safe = item.title.replace(/"/g, '&quot;');
 
-  try {
-    await Sheets.saveSelfEval(State.today, State.selfScore, State.comment, autoScore);
-    showToast('振り返りを保存しました✅');
-    updateScore();
-  } catch (e) {
-    showToast(`保存エラー: ${e.message}`, 'error');
+  return `
+    <div class="tl-item ${cls}" draggable="true"
+         data-type="${item.itemType}" data-id="${item.itemId}"
+         data-slot="${item.timeSlot}" data-date="${date}"
+         data-title="${safe}">
+      <span class="tl-item-icon">${icon}</span>
+      <span class="tl-item-name">${item.title}</span>
+      <button class="tl-item-remove"
+              data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}">✕</button>
+    </div>`;
+}
+
+// ============================================================
+// タイムラインアイテム削除（パネルへ戻す）
+// ============================================================
+function removeTimelineItem(itemId, slot, date) {
+  const tl  = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+  const idx = tl.findIndex(item => item.itemId === itemId && item.timeSlot === slot);
+  if (idx !== -1) tl.splice(idx, 1);
+  renderAll();
+  scheduleSave(date);
+}
+
+// ============================================================
+// ドラッグ & ドロップ
+// ============================================================
+function onItemDragStart(e) {
+  const el = e.currentTarget;
+  State.dragging = {
+    itemType: el.dataset.type,
+    itemId:   el.dataset.id,
+    title:    el.dataset.title,
+    fromSlot: el.dataset.slot,
+    fromDate: el.dataset.date,
+  };
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => el.classList.add('dragging'), 0);
+}
+
+function onItemDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+}
+
+function onSlotDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onSlotDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onSlotDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!State.dragging) return;
+
+  const toSlot = e.currentTarget.dataset.time;
+  const toDate = e.currentTarget.dataset.date;
+  const { itemType, itemId, title, fromSlot, fromDate } = State.dragging;
+
+  // 元の位置から削除
+  if (fromDate !== 'unplaced') {
+    const tl  = fromDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
+    const idx = tl.findIndex(item => item.itemId === itemId && item.timeSlot === fromSlot);
+    if (idx !== -1) tl.splice(idx, 1);
   }
+
+  // 新しい位置に追加
+  const targetTl = toDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
+  targetTl.push({ itemType, itemId, timeSlot: toSlot, title });
+
+  State.dragging = null;
+  renderAll();
+  scheduleSave(toDate);
+  if (fromDate !== 'unplaced' && fromDate !== toDate) scheduleSave(fromDate);
+}
+
+// ルーティンパネルへのドロップ（タイムラインから削除）
+function onPanelDrop(e) {
+  e.preventDefault();
+  document.getElementById('routinesPanelWrap').classList.remove('drag-over');
+  if (!State.dragging) return;
+
+  const { itemId, fromSlot, fromDate } = State.dragging;
+  if (fromDate !== 'unplaced') {
+    const tl  = fromDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
+    const idx = tl.findIndex(item => item.itemId === itemId && item.timeSlot === fromSlot);
+    if (idx !== -1) tl.splice(idx, 1);
+    renderAll();
+    scheduleSave(fromDate);
+  }
+  State.dragging = null;
 }
 
 // ============================================================
-// チャット
+// 保存（デバウンス: 1.5秒後）
 // ============================================================
+const _saveTimers = {};
 
-function addChatMessage(role, text) {
-  const messages = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = `chat-msg ${role}`;
-  div.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g, '<br>')}</div>`;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function showTyping() {
-  const messages = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'chat-msg assistant';
-  div.id = 'typingIndicator';
-  div.innerHTML = `<div class="msg-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function hideTyping() {
-  const el = document.getElementById('typingIndicator');
-  if (el) el.remove();
-}
-
-async function sendChatMessage() {
-  const input = document.getElementById('chatInput');
-  const text  = input.value.trim();
-  if (!text) return;
-
-  input.value = '';
-  document.getElementById('btnSend').disabled = true;
-  addChatMessage('user', text);
-  showTyping();
-
-  try {
-    const result = await Claude.chat(text, State.routines);
-    hideTyping();
-    addChatMessage('assistant', result.message);
-
-    // 達成ルーティンを自動チェック
-    if (result.completed.length > 0) {
-      for (const name of result.completed) {
-        const routine = State.routines.find(r => r.name === name && r.active);
-        if (!routine) continue;
-        const existing = State.dailyLog.find(l => l.routineId === routine.id);
-        if (existing) {
-          existing.completed = true;
-        } else {
-          State.dailyLog.push({ date: State.today, routineId: routine.id, completed: true });
-        }
-      }
-      renderRoutines();
-      updateScore();
-      await Sheets.saveDailyLog(State.today, State.dailyLog);
-      showToast(`${result.completed.length}件のルーティンを記録しました✅`);
+function scheduleSave(date) {
+  if (_saveTimers[date]) clearTimeout(_saveTimers[date]);
+  _saveTimers[date] = setTimeout(async () => {
+    const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+    try {
+      await Sheets.saveTimeline(date, tl);
+    } catch {
+      showToast('保存に失敗しました', 'error');
     }
-  } catch (e) {
-    hideTyping();
-    addChatMessage('assistant', `エラーが発生しました: ${e.message}`);
-  } finally {
-    document.getElementById('btnSend').disabled = false;
-  }
+  }, 1500);
 }
 
 // ============================================================
 // ルーティン設定ビュー
 // ============================================================
-
 function renderRoutineSettings() {
   const container = document.getElementById('routineSettings');
   if (State.routines.length === 0) {
-    container.innerHTML = '<div class="empty-state">まだルーティンがありません。上の「追加」ボタンから始めましょう！</div>';
+    container.innerHTML = '<div class="empty-state">まだルーティンがありません</div>';
     return;
   }
 
@@ -506,22 +479,17 @@ function renderRoutineSettings() {
           <input type="checkbox" ${r.active ? 'checked' : ''} data-id="${r.id}" class="routine-toggle">
           <span class="toggle-slider"></span>
         </label>
-        <button class="btn-edit" data-id="${r.id}">編集</button>
+        <button class="btn-edit"   data-id="${r.id}">編集</button>
         <button class="btn-delete" data-id="${r.id}">削除</button>
       </div>
     </div>`).join('');
 
-  // トグルスイッチ
   container.querySelectorAll('.routine-toggle').forEach(el => {
     el.addEventListener('change', () => toggleRoutineActive(el.dataset.id, el.checked));
   });
-
-  // 編集ボタン
   container.querySelectorAll('.btn-edit').forEach(el => {
     el.addEventListener('click', () => openEditRoutine(el.dataset.id));
   });
-
-  // 削除ボタン
   container.querySelectorAll('.btn-delete').forEach(el => {
     el.addEventListener('click', () => deleteRoutine(el.dataset.id));
   });
@@ -531,19 +499,15 @@ async function toggleRoutineActive(routineId, active) {
   const r = State.routines.find(r => r.id === routineId);
   if (!r) return;
   r.active = active;
-  renderRoutineSettings();
-  renderRoutines();
-  try {
-    await Sheets.saveAllRoutines(State.routines);
-  } catch (e) {
-    showToast('保存に失敗しました', 'error');
-  }
+  renderAll();
+  try { await Sheets.saveAllRoutines(State.routines); }
+  catch { showToast('保存に失敗しました', 'error'); }
 }
 
 function openAddRoutine() {
   State.editRoutineId = null;
   document.getElementById('routineModalTitle').textContent = 'ルーティンを追加';
-  document.getElementById('routineName').value    = '';
+  document.getElementById('routineName').value     = '';
   document.getElementById('routineCategory').value = '健康';
   document.getElementById('routineDuration').value = '';
   openModal('routineModal');
@@ -567,197 +531,57 @@ async function saveRoutine() {
   if (!name) { showToast('名前を入力してください', 'error'); return; }
 
   if (State.editRoutineId) {
-    // 編集
     const r = State.routines.find(r => r.id === State.editRoutineId);
     if (r) { r.name = name; r.category = category; r.duration = duration; }
   } else {
-    // 追加
-    State.routines.push({
-      id: genId(), name, category, duration,
-      active: true, order: State.routines.length,
-    });
+    State.routines.push({ id: genId(), name, category, duration, active: true, order: State.routines.length });
   }
 
   closeModal('routineModal');
-  renderRoutineSettings();
-  renderRoutines();
+  renderAll();
   try {
     await Sheets.saveAllRoutines(State.routines);
-    showToast('ルーティンを保存しました✅');
+    showToast('ルーティンを保存しました ✅');
   } catch (e) {
-    showToast(`保存エラー: ${e.message}`, 'error');
+    showToast('保存エラー: ' + e.message, 'error');
   }
 }
 
 async function deleteRoutine(routineId) {
   if (!confirm('このルーティンを削除しますか？')) return;
   State.routines = State.routines.filter(r => r.id !== routineId);
-  renderRoutineSettings();
-  renderRoutines();
+  renderAll();
   try {
     await Sheets.saveAllRoutines(State.routines);
     showToast('削除しました');
-  } catch (e) {
+  } catch {
     showToast('削除に失敗しました', 'error');
   }
 }
 
 // ============================================================
-// 履歴ビュー
-// ============================================================
-
-async function loadHistory() {
-  try {
-    const history = await Sheets.getHistory(30);
-    renderHistoryList(history);
-    renderScoreChart(history);
-    renderStreak(history);
-  } catch (e) {
-    showToast(`履歴の取得に失敗: ${e.message}`, 'error');
-  }
-}
-
-function renderHistoryList(history) {
-  const container = document.getElementById('historyList');
-  const withData  = history.filter(h => h.hasData).reverse();
-  if (withData.length === 0) {
-    container.innerHTML = '<div class="empty-state">まだ記録がありません</div>';
-    return;
-  }
-
-  container.innerHTML = withData.map(h => {
-    const pct   = h.autoScore ?? 0;
-    const stars = '★'.repeat(h.selfScore) + '☆'.repeat(5 - h.selfScore);
-    const d     = new Date(h.date + 'T00:00:00');
-    const label = `${d.getMonth()+1}/${d.getDate()}`;
-    return `
-      <div class="history-item">
-        <span class="history-date">${label}</span>
-        <div class="history-score-bar">
-          <div class="history-score-fill" style="width:${pct}%"></div>
-        </div>
-        <span class="history-pct">${h.autoScore !== null ? pct + '%' : '--'}</span>
-        <span class="history-stars" style="color:var(--warning)">${h.selfScore > 0 ? stars : '－'}</span>
-        <span class="history-comment">${h.comment || ''}</span>
-      </div>`;
-  }).join('');
-}
-
-function renderScoreChart(history) {
-  const canvas  = document.getElementById('scoreChart');
-  const ctx     = canvas.getContext('2d');
-  const W = canvas.width;
-  const H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-
-  const data = history.filter(h => h.autoScore !== null);
-  if (data.length < 2) {
-    ctx.fillStyle = '#A0A0C0';
-    ctx.font = '13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('データが不足しています（2日以上記録するとグラフが表示されます）', W/2, H/2);
-    return;
-  }
-
-  const pad = { top: 20, right: 20, bottom: 30, left: 36 };
-  const gW  = W - pad.left - pad.right;
-  const gH  = H - pad.top  - pad.bottom;
-
-  // グリッド線
-  ctx.strokeStyle = '#E2E8F0';
-  ctx.lineWidth = 1;
-  [0, 25, 50, 75, 100].forEach(v => {
-    const y = pad.top + gH - (v / 100) * gH;
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(W - pad.right, y);
-    ctx.stroke();
-    ctx.fillStyle = '#A0A0C0';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(v + '%', pad.left - 4, y + 3);
-  });
-
-  // 折れ線
-  ctx.strokeStyle = '#6C63FF';
-  ctx.lineWidth   = 2.5;
-  ctx.lineJoin    = 'round';
-  ctx.beginPath();
-
-  data.forEach((d, i) => {
-    const x = pad.left + (i / (data.length - 1)) * gW;
-    const y = pad.top  + gH - (d.autoScore / 100) * gH;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // 塗り
-  ctx.lineTo(pad.left + gW, pad.top + gH);
-  ctx.lineTo(pad.left, pad.top + gH);
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + gH);
-  grad.addColorStop(0, 'rgba(108,99,255,0.2)');
-  grad.addColorStop(1, 'rgba(108,99,255,0)');
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // 点
-  data.forEach((d, i) => {
-    const x = pad.left + (i / (data.length - 1)) * gW;
-    const y = pad.top  + gH - (d.autoScore / 100) * gH;
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#6C63FF';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  });
-}
-
-function renderStreak(history) {
-  let streak = 0;
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].autoScore !== null && history[i].autoScore >= 50) {
-      streak++;
-    } else if (history[i].hasData) {
-      break;
-    } else {
-      // データなしはスキップ
-      if (i === history.length - 1) continue;
-      break;
-    }
-  }
-  document.getElementById('streakNum').textContent = streak;
-}
-
-// ============================================================
 // 設定モーダル
 // ============================================================
-
 function openSettings() {
-  document.getElementById('settingsClaudeKey').value = Store.get(CONFIG.LS.CLAUDE_KEY) || '';
-  document.getElementById('settingsSheetId').value   = Store.get(CONFIG.LS.SHEET_ID)   || '';
-  document.getElementById('settingsClientId').value  = Store.get(CONFIG.LS.CLIENT_ID)  || '';
+  document.getElementById('settingsSheetId').value  = Store.get(CONFIG.LS.SHEET_ID)  || '';
+  document.getElementById('settingsClientId').value = Store.get(CONFIG.LS.CLIENT_ID) || '';
   openModal('settingsModal');
 }
 
 function saveSettings() {
-  const key      = document.getElementById('settingsClaudeKey').value.trim();
   const sheetId  = document.getElementById('settingsSheetId').value.trim();
   const clientId = document.getElementById('settingsClientId').value.trim();
-  if (key)      Store.set(CONFIG.LS.CLAUDE_KEY,  key);
-  if (sheetId)  { Store.set(CONFIG.LS.SHEET_ID, sheetId);  Sheets.init(sheetId); }
+  if (sheetId)  { Store.set(CONFIG.LS.SHEET_ID,  sheetId);  Sheets.init(sheetId); }
   if (clientId) { Store.set(CONFIG.LS.CLIENT_ID, clientId); Auth.init(); }
   closeModal('settingsModal');
-  showToast('設定を保存しました✅');
+  showToast('設定を保存しました ✅');
 }
 
 // ============================================================
-// イベントリスナーの登録
+// DOMContentLoaded
 // ============================================================
-
 document.addEventListener('DOMContentLoaded', () => {
+
   // セットアップ済みかチェック
   if (Store.get(CONFIG.LS.SETUP_DONE)) {
     waitForGoogle(() => {
@@ -770,111 +594,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ナビゲーション
   document.querySelectorAll('.nav-item').forEach(el => {
-    el.addEventListener('click', async () => {
+    el.addEventListener('click', () => {
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       document.querySelectorAll('.view').forEach(v => {
         v.classList.add('hidden');
         v.classList.remove('active');
       });
       el.classList.add('active');
-      const viewId = el.dataset.view + 'View';
-      const view   = document.getElementById(viewId);
-      if (view) {
-        view.classList.remove('hidden');
-        view.classList.add('active');
-      }
-      if (el.dataset.view === 'history') {
-        await loadHistory();
-      }
+      const view = document.getElementById(el.dataset.view + 'View');
+      if (view) { view.classList.remove('hidden'); view.classList.add('active'); }
     });
   });
 
-  // カレンダー取得
-  document.getElementById('btnSyncCalendar').addEventListener('click', loadCalendarEvents);
+  // ルーティンパネルのドロップゾーン
+  const panelWrap = document.getElementById('routinesPanelWrap');
+  panelWrap.addEventListener('dragover',  e => { e.preventDefault(); panelWrap.classList.add('drag-over'); });
+  panelWrap.addEventListener('dragleave', () => panelWrap.classList.remove('drag-over'));
+  panelWrap.addEventListener('drop', onPanelDrop);
 
-  // タスク追加
-  document.getElementById('btnAddTask').addEventListener('click', () => openModal('taskModal'));
-  document.getElementById('btnCancelTask').addEventListener('click', () => closeModal('taskModal'));
-  document.getElementById('btnSaveTask').addEventListener('click', async () => {
-    const name = document.getElementById('taskName').value.trim();
-    const time = document.getElementById('taskTime').value;
-    if (!name) { showToast('内容を入力してください', 'error'); return; }
-    const task = { id: genId(), date: State.today, name, time, completed: false, source: 'manual' };
-    State.manualTasks.push(task);
-    renderManualTasks();
-    closeModal('taskModal');
-    document.getElementById('taskName').value = '';
-    document.getElementById('taskTime').value = '';
-    try {
-      await Sheets.addManualTask(task);
-      showToast('予定を追加しました');
-    } catch (e) {
-      showToast('保存に失敗しました', 'error');
-    }
-  });
-
-  // 振り返り: 星評価
-  document.querySelectorAll('.star').forEach(el => {
-    el.addEventListener('click', () => {
-      const val = parseInt(el.dataset.value, 10);
-      State.selfScore = State.selfScore === val ? 0 : val;
-      renderEval();
-      updateScore();
-    });
-    el.addEventListener('mouseover', () => {
-      const val = parseInt(el.dataset.value, 10);
-      document.querySelectorAll('.star').forEach(s => {
-        s.classList.toggle('active', parseInt(s.dataset.value, 10) <= val);
-      });
-    });
-    el.addEventListener('mouseleave', () => renderEval());
-  });
-
-  document.getElementById('commentInput').addEventListener('input', e => {
-    State.comment = e.target.value;
-  });
-
-  document.getElementById('btnSaveEval').addEventListener('click', saveEval);
-
-  // チャット
-  document.getElementById('chatToggle').addEventListener('click', () => {
-    const body = document.getElementById('chatBody');
-    const icon = document.getElementById('chatToggleIcon');
-    State.chatCollapsed = !State.chatCollapsed;
-    body.style.display  = State.chatCollapsed ? 'none' : '';
-    icon.classList.toggle('collapsed', State.chatCollapsed);
-  });
-
-  document.getElementById('btnSend').addEventListener('click', sendChatMessage);
-  document.getElementById('chatInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
-  });
-
-  // ルーティン設定
+  // ルーティン追加ボタン
+  document.getElementById('btnAddRoutinePanel').addEventListener('click', openAddRoutine);
   document.getElementById('btnAddRoutine').addEventListener('click', openAddRoutine);
   document.getElementById('btnCancelRoutine').addEventListener('click', () => closeModal('routineModal'));
   document.getElementById('btnSaveRoutine').addEventListener('click', saveRoutine);
 
-  // 設定モーダル
+  // 設定
   document.getElementById('btnSettings').addEventListener('click', openSettings);
   document.getElementById('btnCancelSettings').addEventListener('click', () => closeModal('settingsModal'));
   document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
   document.getElementById('btnResetApp').addEventListener('click', () => {
-    if (confirm('すべての設定をリセットして初期状態に戻しますか？\n（Googleスプレッドシートのデータは残ります）')) {
-      Store.clear();
-      location.reload();
-    }
+    if (confirm('すべての設定をリセットしますか？')) { Store.clear(); location.reload(); }
   });
 
-  // 同期ボタン
-  document.getElementById('btnSync').addEventListener('click', async () => {
-    showToast('データを同期中...');
-    await loadTodayData();
-    showToast('同期完了✅');
-  });
+  // 同期
+  document.getElementById('btnSync').addEventListener('click', loadAll);
 
-  // オーバーレイクリックでモーダルを閉じる
-  ['routineModal', 'taskModal', 'settingsModal'].forEach(id => {
+  // モーダルオーバーレイクリックで閉じる
+  ['routineModal', 'settingsModal'].forEach(id => {
     document.getElementById(id).addEventListener('click', e => {
       if (e.target.id === id) closeModal(id);
     });

@@ -16,12 +16,12 @@
   <div class="modal-box setup-box">
     <div class="setup-logo">📋</div>
     <h1 class="setup-title">Daily Tracker</h1>
-    <p class="setup-sub">1日のルーティンを管理して、幸福度を上げましょう</p>
+    <p class="setup-sub">1日のスケジュールを可視化して、充実した毎日を</p>
 
     <div class="setup-steps">
       <!-- Step 1: Google Client ID -->
       <div class="setup-step active" id="step1">
-        <div class="step-num">1 / 4</div>
+        <div class="step-num">1 / 3</div>
         <h2>Google Cloud の設定</h2>
         <p>Google カレンダーと連携するために<br>OAuth クライアントIDが必要です。</p>
         <a href="#" class="help-link" id="showClientIdHelp">取得方法を見る →</a>
@@ -29,9 +29,9 @@
           <ol>
             <li><a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> を開く</li>
             <li>新しいプロジェクトを作成</li>
-            <li>「APIとサービス」→「認証情報」→「認証情報を作成」→「OAuthクライアントID」</li>
+            <li>「APIとサービス」→「認証情報」→「OAuthクライアントID」を作成</li>
             <li>アプリの種類：「ウェブアプリケーション」</li>
-            <li>承認済みのJavaScriptオリジンに <code>http://localhost:8080</code> と後でGitHub PagesのURLを追加</li>
+            <li>承認済みのJavaScriptオリジンにGitHub PagesのURLを追加</li>
             <li>Google Sheets API と Google Calendar API を有効化</li>
           </ol>
         </div>
@@ -41,7 +41,7 @@
 
       <!-- Step 2: Google Sign In -->
       <div class="setup-step hidden" id="step2">
-        <div class="step-num">2 / 4</div>
+        <div class="step-num">2 / 3</div>
         <h2>Googleアカウントを連携</h2>
         <p>カレンダーとスプレッドシートに<br>アクセスするための認証を行います。</p>
         <button class="btn-google" id="btnGoogleSignIn">
@@ -54,25 +54,14 @@
 
       <!-- Step 3: Google Sheet -->
       <div class="setup-step hidden" id="step3">
-        <div class="step-num">3 / 4</div>
+        <div class="step-num">3 / 3</div>
         <h2>データ保存先の設定</h2>
         <p>記録をGoogleスプレッドシートに保存します。<br>新規作成するか、既存のIDを入力してください。</p>
         <button class="btn-secondary" id="btnCreateSheet">📊 新規スプレッドシートを自動作成</button>
         <div class="divider">または</div>
         <input type="text" id="inputSheetId" placeholder="既存のスプレッドシートID" class="setup-input">
         <div class="sheet-status hidden" id="sheetStatus"></div>
-        <button class="btn-primary hidden" id="btnStep3Next">次へ →</button>
-      </div>
-
-      <!-- Step 4: Claude API Key -->
-      <div class="setup-step hidden" id="step4">
-        <div class="step-num">4 / 4</div>
-        <h2>Claude API キーを設定</h2>
-        <p>チャットで話しかけると、自動でルーティンを<br>記録する機能に使います。</p>
-        <a href="https://console.anthropic.com/" target="_blank" class="help-link">APIキーを取得する →</a>
-        <input type="password" id="inputClaudeKey" placeholder="sk-ant-..." class="setup-input">
-        <p class="note">※ APIキーはあなたのブラウザのみに保存され、どこにも送信されません。<br>月の使用料は数十円程度です（Haiku モデル使用）。</p>
-        <button class="btn-primary" id="btnFinishSetup">🚀 アプリを起動する</button>
+        <button class="btn-primary hidden" id="btnStep3Next">🚀 アプリを起動する</button>
       </div>
     </div>
   </div>
@@ -87,14 +76,11 @@
   <nav class="sidebar">
     <div class="sidebar-logo">📋<span>Daily</span></div>
     <ul class="nav-list">
-      <li class="nav-item active" data-view="today">
-        <span class="nav-icon">☀️</span><span class="nav-label">今日</span>
+      <li class="nav-item active" data-view="schedule">
+        <span class="nav-icon">📅</span><span class="nav-label">スケジュール</span>
       </li>
       <li class="nav-item" data-view="routines">
         <span class="nav-icon">🔄</span><span class="nav-label">ルーティン設定</span>
-      </li>
-      <li class="nav-item" data-view="history">
-        <span class="nav-icon">📈</span><span class="nav-label">履歴・グラフ</span>
       </li>
     </ul>
     <div class="sidebar-footer">
@@ -110,133 +96,52 @@
   <!-- メインコンテンツ -->
   <main class="main-content">
 
-    <!-- ===== 今日ビュー ===== -->
-    <section id="todayView" class="view active">
-      <div class="view-header">
-        <div>
-          <h1 id="todayHeading">2026年4月12日（日）</h1>
-          <p class="view-sub" id="todayGreeting">おはようございます！今日も頑張りましょう</p>
-        </div>
-        <div class="score-badge" id="scoreBadge">
-          <div class="score-auto">
-            <span class="score-label">達成率</span>
-            <span class="score-value" id="autoScoreVal">--%</span>
-          </div>
-          <div class="score-divider"></div>
-          <div class="score-self">
-            <span class="score-label">自己評価</span>
-            <div class="star-mini" id="starMini">☆☆☆☆☆</div>
-          </div>
-        </div>
-      </div>
+    <!-- ===== スケジュールビュー ===== -->
+    <section id="scheduleView" class="view active">
+      <div class="timeline-layout">
 
-      <div class="today-grid">
-        <!-- ルーティンカード -->
-        <div class="card routines-card">
-          <div class="card-header">
-            <h2>✅ ルーティン</h2>
-            <span class="progress-text" id="routineProgress">0 / 0</span>
+        <!-- 左パネル: ルーティン一覧 -->
+        <div class="routines-panel-wrap" id="routinesPanelWrap">
+          <div class="panel-header">
+            <span class="panel-title">🔄 ルーティン</span>
+            <button class="btn-panel-add" id="btnAddRoutinePanel" title="ルーティンを追加">＋</button>
           </div>
-          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-          <ul class="routine-list" id="routineList">
-            <li class="empty-state">ルーティンを設定してください</li>
-          </ul>
+          <div id="routinesPanel" class="routines-panel-list">
+            <div class="empty-state">ルーティンを追加してください</div>
+          </div>
+          <div class="panel-hint">↑ タイムラインへドラッグ</div>
         </div>
 
-        <!-- 今日の予定カード -->
-        <div class="card schedule-card">
-          <div class="card-header">
-            <h2>📅 今日の予定</h2>
-            <button class="btn-small" id="btnSyncCalendar">カレンダー取得</button>
-          </div>
-          <div id="calendarEvents" class="event-list"></div>
-          <div id="manualTasks" class="task-list"></div>
-          <button class="btn-add-task" id="btnAddTask">＋ 予定を手動追加</button>
+        <!-- 今日のタイムライン -->
+        <div class="timeline-col-wrap">
+          <div class="timeline-col-header" id="todayLabel">今日</div>
+          <div id="todayTimeline" class="timeline-col-body"></div>
         </div>
-      </div>
 
-      <!-- 振り返りカード -->
-      <div class="card eval-card">
-        <h2>🌟 今日の振り返り</h2>
-        <div class="eval-row">
-          <div class="star-rating" id="starRating">
-            <span class="star" data-value="1">★</span>
-            <span class="star" data-value="2">★</span>
-            <span class="star" data-value="3">★</span>
-            <span class="star" data-value="4">★</span>
-            <span class="star" data-value="5">★</span>
-          </div>
-          <textarea id="commentInput" class="comment-input" placeholder="今日の一言コメント（任意）" rows="2"></textarea>
-          <button class="btn-primary btn-save-eval" id="btnSaveEval">保存</button>
+        <!-- 明日のタイムライン -->
+        <div class="timeline-col-wrap">
+          <div class="timeline-col-header" id="tomorrowLabel">明日</div>
+          <div id="tomorrowTimeline" class="timeline-col-body"></div>
         </div>
-      </div>
 
-      <!-- チャットパネル -->
-      <div class="chat-panel" id="chatPanel">
-        <div class="chat-header" id="chatToggle">
-          <span>💬 チャットで記録する</span>
-          <span class="chat-toggle-icon" id="chatToggleIcon">▲</span>
-        </div>
-        <div class="chat-body" id="chatBody">
-          <div class="chat-messages" id="chatMessages">
-            <div class="chat-msg assistant">
-              <div class="msg-bubble">こんにちは！今日やったことを自然な言葉で教えてください。例：「朝ランニングして読書30分やった」</div>
-            </div>
-          </div>
-          <div class="chat-input-row">
-            <textarea id="chatInput" class="chat-input" placeholder="今日やったことを話しかけてみてください..." rows="2"></textarea>
-            <button class="btn-send" id="btnSend">送信</button>
-          </div>
-        </div>
       </div>
     </section>
 
     <!-- ===== ルーティン設定ビュー ===== -->
     <section id="routinesView" class="view hidden">
-      <div class="view-header">
-        <div>
-          <h1>🔄 ルーティン設定</h1>
-          <p class="view-sub">毎日繰り返すタスクを管理します</p>
+      <div class="view-padded">
+        <div class="view-header">
+          <div>
+            <h1>🔄 ルーティン設定</h1>
+            <p class="view-sub">毎日繰り返すタスクを管理します</p>
+          </div>
+          <button class="btn-primary" id="btnAddRoutine">＋ ルーティンを追加</button>
         </div>
-        <button class="btn-primary" id="btnAddRoutine">＋ ルーティンを追加</button>
-      </div>
-
-      <div class="card">
-        <div id="routineSettings" class="routine-settings-list">
-          <div class="empty-state">まだルーティンがありません。上の「追加」ボタンから始めましょう！</div>
+        <div class="card">
+          <div id="routineSettings" class="routine-settings-list">
+            <div class="empty-state">まだルーティンがありません。上の「追加」ボタンから始めましょう！</div>
+          </div>
         </div>
-      </div>
-
-      <div class="card categories-card">
-        <h2>カテゴリ別集計（今月）</h2>
-        <div id="categoryStats" class="category-stats"></div>
-      </div>
-    </section>
-
-    <!-- ===== 履歴ビュー ===== -->
-    <section id="historyView" class="view hidden">
-      <div class="view-header">
-        <div>
-          <h1>📈 履歴・グラフ</h1>
-          <p class="view-sub">過去の記録とスコアの推移</p>
-        </div>
-      </div>
-
-      <div class="history-grid">
-        <div class="card chart-card">
-          <h2>スコア推移（直近30日）</h2>
-          <canvas id="scoreChart" width="600" height="200"></canvas>
-        </div>
-        <div class="card streak-card">
-          <h2>🔥 連続達成</h2>
-          <div class="streak-num" id="streakNum">0</div>
-          <div class="streak-label">日連続</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>日別記録</h2>
-        <div id="historyList" class="history-list"></div>
       </div>
     </section>
 
@@ -247,7 +152,7 @@
      モーダル群
      ============================================================ -->
 
-<!-- ルーティン追加モーダル -->
+<!-- ルーティン追加・編集モーダル -->
 <div id="routineModal" class="modal-overlay hidden">
   <div class="modal-box">
     <h2 id="routineModalTitle">ルーティンを追加</h2>
@@ -277,33 +182,10 @@
   </div>
 </div>
 
-<!-- タスク追加モーダル -->
-<div id="taskModal" class="modal-overlay hidden">
-  <div class="modal-box">
-    <h2>予定を追加</h2>
-    <div class="form-group">
-      <label>内容</label>
-      <input type="text" id="taskName" class="form-input" placeholder="例：歯医者、買い物">
-    </div>
-    <div class="form-group">
-      <label>時間（任意）</label>
-      <input type="time" id="taskTime" class="form-input">
-    </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="btnCancelTask">キャンセル</button>
-      <button class="btn-primary" id="btnSaveTask">追加</button>
-    </div>
-  </div>
-</div>
-
 <!-- 設定モーダル -->
 <div id="settingsModal" class="modal-overlay hidden">
   <div class="modal-box">
     <h2>⚙️ 設定</h2>
-    <div class="form-group">
-      <label>Claude API キー</label>
-      <input type="password" id="settingsClaudeKey" class="form-input">
-    </div>
     <div class="form-group">
       <label>Google スプレッドシートID</label>
       <input type="text" id="settingsSheetId" class="form-input">
@@ -328,7 +210,6 @@
 <script src="js/auth.js"></script>
 <script src="js/sheets.js"></script>
 <script src="js/calendar.js"></script>
-<script src="js/claude.js"></script>
 <script src="js/app.js"></script>
 
 </body>

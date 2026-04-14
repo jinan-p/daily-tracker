@@ -37,16 +37,13 @@ const Sheets = {
     const existing = meta.sheets.map(s => s.properties.title);
 
     const headers = {
-      [CONFIG.SHEET.ROUTINES]:     [['id', 'name', 'category', 'duration', 'active', 'order']],
-      [CONFIG.SHEET.DAILY_LOG]:    [['date', 'routineId', 'completed']],
-      [CONFIG.SHEET.MANUAL_TASKS]: [['id', 'date', 'name', 'time', 'completed', 'source']],
-      [CONFIG.SHEET.SELF_EVAL]:    [['date', 'selfScore', 'comment', 'autoScore']],
+      [CONFIG.SHEET.ROUTINES]: [['id', 'name', 'category', 'duration', 'active', 'order']],
+      [CONFIG.SHEET.TIMELINE]: [['date', 'itemType', 'itemId', 'timeSlot', 'title']],
     };
 
     const toAdd = Object.keys(headers).filter(name => !existing.includes(name));
     if (toAdd.length === 0) return;
 
-    // シート追加リクエスト
     const addRequests = toAdd.map(title => ({
       addSheet: { properties: { title } },
     }));
@@ -55,9 +52,27 @@ const Sheets = {
       body: JSON.stringify({ requests: addRequests }),
     });
 
-    // ヘッダー行を書き込み
     for (const name of toAdd) {
       await this._write(`${name}!A1`, headers[name]);
+    }
+  },
+
+  // ------------------------------------------------------------
+  // Timeline シートが存在しない場合は作成（既存ユーザー向け）
+  // ------------------------------------------------------------
+  async ensureTimelineSheet() {
+    try {
+      const meta = await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}?fields=sheets.properties.title`);
+      const existing = meta.sheets.map(s => s.properties.title);
+      if (!existing.includes(CONFIG.SHEET.TIMELINE)) {
+        await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}:batchUpdate`, {
+          method: 'POST',
+          body: JSON.stringify({ requests: [{ addSheet: { properties: { title: CONFIG.SHEET.TIMELINE } } }] }),
+        });
+        await this._write(`${CONFIG.SHEET.TIMELINE}!A1`, [['date', 'itemType', 'itemId', 'timeSlot', 'title']]);
+      }
+    } catch (e) {
+      console.warn('Timeline sheet ensure error:', e);
     }
   },
 
@@ -76,21 +91,16 @@ const Sheets = {
         properties: { title },
         sheets: [
           { properties: { title: CONFIG.SHEET.ROUTINES } },
-          { properties: { title: CONFIG.SHEET.DAILY_LOG } },
-          { properties: { title: CONFIG.SHEET.MANUAL_TASKS } },
-          { properties: { title: CONFIG.SHEET.SELF_EVAL } },
+          { properties: { title: CONFIG.SHEET.TIMELINE } },
         ],
       }),
     });
     if (!res.ok) throw new Error('スプレッドシートの作成に失敗しました');
     const data = await res.json();
 
-    // ヘッダー行を書き込み
     this.sheetId = data.spreadsheetId;
-    await this._write(`${CONFIG.SHEET.ROUTINES}!A1`,     [['id', 'name', 'category', 'duration', 'active', 'order']]);
-    await this._write(`${CONFIG.SHEET.DAILY_LOG}!A1`,    [['date', 'routineId', 'completed']]);
-    await this._write(`${CONFIG.SHEET.MANUAL_TASKS}!A1`, [['id', 'date', 'name', 'time', 'completed', 'source']]);
-    await this._write(`${CONFIG.SHEET.SELF_EVAL}!A1`,    [['date', 'selfScore', 'comment', 'autoScore']]);
+    await this._write(`${CONFIG.SHEET.ROUTINES}!A1`, [['id', 'name', 'category', 'duration', 'active', 'order']]);
+    await this._write(`${CONFIG.SHEET.TIMELINE}!A1`, [['date', 'itemType', 'itemId', 'timeSlot', 'title']]);
 
     return data.spreadsheetId;
   },
@@ -248,6 +258,36 @@ const Sheets = {
     } else {
       const rowNum = idx + 2;
       await this._write(`${CONFIG.SHEET.SELF_EVAL}!A${rowNum}:D${rowNum}`, [[date, selfScore, comment, autoScore]]);
+    }
+  },
+
+  // ============================================================
+  // タイムライン
+  // ============================================================
+
+  async getTimeline(date) {
+    const rows = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:E10000`);
+    return rows
+      .filter(r => r[0] === date)
+      .map(r => ({
+        date:     r[0] || '',
+        itemType: r[1] || 'routine',
+        itemId:   r[2] || '',
+        timeSlot: r[3] || 'unplaced',
+        title:    r[4] || '',
+      }));
+  },
+
+  async saveTimeline(date, items) {
+    const all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:E10000`);
+    const others = all.filter(r => r[0] !== date);
+    const dateRows = items.map(item => [date, item.itemType, item.itemId, item.timeSlot, item.title]);
+    const newAll = [...others, ...dateRows];
+
+    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.TIMELINE + '!A2:E10000')}:clear`;
+    await this._req(clearUrl, { method: 'POST', body: '{}' });
+    if (newAll.length > 0) {
+      await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll);
     }
   },
 

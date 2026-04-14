@@ -3,10 +3,6 @@
 // ============================================================
 
 const CONFIG = {
-  // Claude API
-  CLAUDE_MODEL: 'claude-haiku-4-5-20251001',
-  CLAUDE_API_URL: 'https://claude-proxy.teikokushouji.workers.dev',
-
   // Google API スコープ
   SCOPES: [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -16,22 +12,19 @@ const CONFIG = {
   ].join(' '),
 
   // Google API エンドポイント
-  SHEETS_BASE: 'https://sheets.googleapis.com/v4/spreadsheets',
+  SHEETS_BASE:   'https://sheets.googleapis.com/v4/spreadsheets',
   CALENDAR_BASE: 'https://www.googleapis.com/calendar/v3',
 
   // スプレッドシートのシート名
   SHEET: {
     ROUTINES: 'Routines',
-    DAILY_LOG: 'DailyLog',
-    MANUAL_TASKS: 'ManualTasks',
-    SELF_EVAL: 'SelfEval',
+    TIMELINE: 'Timeline',
   },
 
-  // localStorage キー（APIキーは絶対にGitHubにpushしない）
+  // localStorage キー
   LS: {
     CLIENT_ID:    'dt_google_client_id',
     SHEET_ID:     'dt_sheet_id',
-    CLAUDE_KEY:   'dt_claude_api_key',
     ACCESS_TOKEN: 'dt_access_token',
     TOKEN_EXP:    'dt_token_exp',
     USER_NAME:    'dt_user_name',
