@@ -63,6 +63,18 @@ function getGreeting() {
 }
 
 // ============================================================
+// Google Identity Services のロード待ち
+// ============================================================
+
+function waitForGoogle(callback) {
+  if (typeof google !== 'undefined' && google.accounts) {
+    callback();
+  } else {
+    setTimeout(() => waitForGoogle(callback), 100);
+  }
+}
+
+// ============================================================
 // セットアップ画面
 // ============================================================
 
@@ -78,8 +90,10 @@ function initSetup() {
     const clientId = document.getElementById('inputClientId').value.trim();
     if (!clientId) { showToast('Client IDを入力してください', 'error'); return; }
     Store.set(CONFIG.LS.CLIENT_ID, clientId);
-    Auth.init();
-    showStep('step2');
+    waitForGoogle(() => {
+      Auth.init();
+      showStep('step2');
+    });
   });
 
   // Step 2: Googleサインイン
@@ -746,8 +760,10 @@ function saveSettings() {
 document.addEventListener('DOMContentLoaded', () => {
   // セットアップ済みかチェック
   if (Store.get(CONFIG.LS.SETUP_DONE)) {
-    Auth.init();
-    launchApp();
+    waitForGoogle(() => {
+      Auth.init();
+      launchApp();
+    });
   } else {
     initSetup();
   }
