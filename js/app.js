@@ -244,6 +244,17 @@ async function launchApp() {
 // データ読み込み
 // ============================================================
 async function loadAll() {
+  // トークンが期限切れなら先に取得（ポップアップの競合を防ぐ）
+  if (Auth.isExpired()) {
+    try {
+      await Auth.getToken();
+    } catch (e) {
+      showToast('認証が必要です。右下の🔄ボタンを押してください', 'error');
+      renderAll();
+      return;
+    }
+  }
+
   try {
     const [routines, todayTl, tomorrowTl] = await Promise.all([
       Sheets.getRoutines(),

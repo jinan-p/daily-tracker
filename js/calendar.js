@@ -8,7 +8,11 @@ const Calendar = {
   // 指定日のイベントを取得
   // ------------------------------------------------------------
   async getEvents(dateStr) {
-    const token = await Auth.getToken();
+    // 既存のトークンのみ使用（ここで再認証ポップアップは出さない）
+    if (!Auth.accessToken || Auth.isExpired()) {
+      throw new Error('トークンが期限切れです。🔄ボタンで再認証してください');
+    }
+    const token = Auth.accessToken;
 
     // 日本時間 00:00〜23:59 を UTC に変換
     const timeMin = `${dateStr}T00:00:00+09:00`;
