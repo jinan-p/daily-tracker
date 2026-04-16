@@ -48,6 +48,10 @@ body {
    ============================================================ */
 .hidden { display: none !important; }
 .active { display: block !important; }
+/* flex レイアウトが必要な要素は block 上書きを戻す */
+.view.active         { display: flex !important; }
+#app.active          { display: flex !important; }
+.modal-overlay.active { display: flex !important; }
 
 /* ============================================================
    モーダルオーバーレイ
