@@ -1256,10 +1256,9 @@ body {
   display: grid;
   grid-template-columns: 190px 1fr 1fr;
   flex: 1;
+  min-height: 0;   /* flex子要素が縮まるために必須 */
   overflow: hidden;
   border-top: 1px solid var(--border);
-  /* スワイプ中のちらつきを防ぐ */
-  touch-action: pan-y;
 }
 
 /* ============================================================
