@@ -234,6 +234,7 @@ async function launchApp() {
   State.today    = State.actualToday;
   State.tomorrow = tomorrowStr();
 
+  loadMemo();
   renderAll();
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
@@ -297,6 +298,12 @@ async function loadAll() {
       showToast('カレンダー取得失敗: ' + calErr.message, 'error');
     }
 
+    // ルーティン自動配置（未配置分のみ）
+    const todayAdded    = autoFillRoutines(State.todayTimeline);
+    const tomorrowAdded = autoFillRoutines(State.tomorrowTimeline);
+    if (todayAdded)    scheduleSave(State.today);
+    if (tomorrowAdded) scheduleSave(State.tomorrow);
+
     renderAll();
     showToast('読み込み完了 ✅');
   } catch (e) {
@@ -339,10 +346,40 @@ async function navigateDates(delta) {
       mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
     } catch (_) {}
 
+    // ルーティン自動配置（未配置分のみ）
+    const todayAdded    = autoFillRoutines(State.todayTimeline);
+    const tomorrowAdded = autoFillRoutines(State.tomorrowTimeline);
+    if (todayAdded)    scheduleSave(State.today);
+    if (tomorrowAdded) scheduleSave(State.tomorrow);
+
     renderAll();
   } catch (e) {
     showToast('読み込みエラー: ' + e.message, 'error');
   }
+}
+
+// ============================================================
+// ルーティン自動配置（05:00から空きスロットへ順番に配置）
+// 既に配置済み・スロットが埋まっている場合はスキップ
+// 追加があった場合は true を返す
+// ============================================================
+function autoFillRoutines(timeline) {
+  const activeRoutines = State.routines.filter(r => r.active && !r.onetime);
+  if (activeRoutines.length === 0) return false;
+
+  const placedIds     = new Set(timeline.filter(i => i.itemType === 'routine').map(i => i.itemId));
+  const occupiedSlots = new Set(timeline.map(i => i.timeSlot));
+
+  let added = false;
+  for (const r of activeRoutines) {
+    if (placedIds.has(r.id)) continue;
+    const slot = TIME_SLOTS.find(s => !occupiedSlots.has(s));
+    if (!slot) break;
+    timeline.push({ itemType: 'routine', itemId: r.id, timeSlot: slot, title: r.name, score: null });
+    occupiedSlots.add(slot);
+    added = true;
+  }
+  return added;
 }
 
 // カレンダーイベントをタイムラインへ自動配置（未配置のものだけ）
@@ -399,13 +436,16 @@ function renderRoutinesPanel() {
            data-title="${safeTitle}">
         <span class="routine-card-icon">${State.panelTab === 'onetime' ? '⚡' : (CATEGORY_ICONS[r.category] || '📌')}</span>
         <span class="routine-card-name">${r.name}</span>
-        ${r.duration ? `<span class="routine-card-meta">${r.duration}</span>` : ''}
       </div>`;
   }).join('');
 
   container.querySelectorAll('.routine-card').forEach(el => {
     el.addEventListener('dragstart', onItemDragStart);
     el.addEventListener('dragend',   onItemDragEnd);
+    // パネル内並び替え
+    el.addEventListener('dragover',  onPanelCardDragOver);
+    el.addEventListener('dragleave', onPanelCardDragLeave);
+    el.addEventListener('drop',      onPanelCardDrop);
   });
 }
 
@@ -614,6 +654,44 @@ function onPanelDrop(e) {
 }
 
 // ============================================================
+// パネルカード内ドラッグ並び替え
+// ============================================================
+function onPanelCardDragOver(e) {
+  // パネルアイテム同士の並び替えのみ処理
+  if (!State.dragging || State.dragging.fromDate !== 'unplaced') return;
+  e.preventDefault();
+  e.stopPropagation(); // パネルコンテナへの伝播を防ぐ
+  e.currentTarget.classList.add('drag-reorder');
+}
+
+function onPanelCardDragLeave(e) {
+  e.currentTarget.classList.remove('drag-reorder');
+}
+
+function onPanelCardDrop(e) {
+  e.currentTarget.classList.remove('drag-reorder');
+  if (!State.dragging || State.dragging.fromDate !== 'unplaced') return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const dragId   = State.dragging.itemId;
+  const targetId = e.currentTarget.dataset.id;
+  if (!dragId || !targetId || dragId === targetId) return;
+
+  const dragIdx   = State.routines.findIndex(r => r.id === dragId);
+  const targetIdx = State.routines.findIndex(r => r.id === targetId);
+  if (dragIdx === -1 || targetIdx === -1) return;
+
+  const [moved] = State.routines.splice(dragIdx, 1);
+  State.routines.splice(targetIdx, 0, moved);
+  State.routines.forEach((r, i) => { r.order = i; });
+
+  State.dragging = null;
+  renderAll();
+  Sheets.saveAllRoutines(State.routines).catch(() => showToast('並び順の保存に失敗しました', 'error'));
+}
+
+// ============================================================
 // 保存（デバウンス: 1.5秒後）
 // ============================================================
 const _saveTimers = {};
@@ -731,7 +809,7 @@ function renderRoutineSettings() {
       <span class="drag-handle">⠿</span>
       <div class="routine-setting-info">
         <div class="routine-setting-name">${r.name}</div>
-        <div class="routine-setting-meta">${r.category}${r.duration ? ' · ' + r.duration : ''}</div>
+        <div class="routine-setting-meta">${r.category}</div>
       </div>
       <div class="routine-setting-actions">
         <label class="toggle-switch">
@@ -768,7 +846,6 @@ function openAddRoutine(isOnetime = false) {
   document.getElementById('routineModalTitle').textContent = isOnetime ? '単発タスクを追加' : 'ルーティンを追加';
   document.getElementById('routineName').value     = '';
   document.getElementById('routineCategory').value = '健康';
-  document.getElementById('routineDuration').value = '';
   document.getElementById('routineOnetimeFlag').value = isOnetime ? '1' : '0';
   // 単発タスクはカテゴリ不要なので非表示
   document.getElementById('routineCategoryGroup').style.display = isOnetime ? 'none' : '';
@@ -782,22 +859,20 @@ function openEditRoutine(routineId) {
   document.getElementById('routineModalTitle').textContent = 'ルーティンを編集';
   document.getElementById('routineName').value     = r.name;
   document.getElementById('routineCategory').value = r.category;
-  document.getElementById('routineDuration').value = r.duration;
   openModal('routineModal');
 }
 
 async function saveRoutine() {
-  const name     = document.getElementById('routineName').value.trim();
-  const category = document.getElementById('routineCategory').value;
-  const duration = document.getElementById('routineDuration').value.trim();
+  const name      = document.getElementById('routineName').value.trim();
+  const category  = document.getElementById('routineCategory').value;
   const isOnetime = document.getElementById('routineOnetimeFlag').value === '1';
   if (!name) { showToast('名前を入力してください', 'error'); return; }
 
   if (State.editRoutineId) {
     const r = State.routines.find(r => r.id === State.editRoutineId);
-    if (r) { r.name = name; r.category = category; r.duration = duration; }
+    if (r) { r.name = name; r.category = category; }
   } else {
-    State.routines.push({ id: genId(), name, category, duration, active: true, order: State.routines.length, onetime: isOnetime });
+    State.routines.push({ id: genId(), name, category, duration: '', active: true, order: State.routines.length, onetime: isOnetime });
   }
 
   closeModal('routineModal');
@@ -820,6 +895,46 @@ async function deleteRoutine(routineId) {
   } catch {
     showToast('削除に失敗しました', 'error');
   }
+}
+
+// ============================================================
+// メモ
+// ============================================================
+function loadMemo() {
+  const text = Store.get(CONFIG.LS.MEMO) || '';
+  document.getElementById('memoTextarea').value = text;
+  renderMemoDisplay(text);
+}
+
+function saveMemo() {
+  const text = document.getElementById('memoTextarea').value;
+  Store.set(CONFIG.LS.MEMO, text);
+  renderMemoDisplay(text);
+  setMemoEditMode(false);
+}
+
+function renderMemoDisplay(text) {
+  const display = document.getElementById('memoDisplay');
+  if (!text.trim()) {
+    display.innerHTML = '<p class="memo-empty">メモはまだありません。「編集」ボタンで追加しましょう。</p>';
+    return;
+  }
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const linked = escaped.replace(
+    /(https?:\/\/[^\s]+)/g,
+    '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+  );
+  display.innerHTML = linked.replace(/\n/g, '<br>');
+}
+
+function setMemoEditMode(editing) {
+  document.getElementById('memoDisplay').classList.toggle('hidden', editing);
+  document.getElementById('memoTextarea').classList.toggle('hidden', !editing);
+  document.getElementById('btnMemoEdit').textContent = editing ? '保存' : '編集';
+  if (editing) setTimeout(() => document.getElementById('memoTextarea').focus(), 50);
 }
 
 // ============================================================
@@ -903,6 +1018,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnSaveSettings').addEventListener('click', saveSettings);
   document.getElementById('btnResetApp').addEventListener('click', () => {
     if (confirm('すべての設定をリセットしますか？')) { Store.clear(); location.reload(); }
+  });
+
+  // メモ
+  document.getElementById('btnMemoEdit').addEventListener('click', () => {
+    const isEditing = !document.getElementById('memoTextarea').classList.contains('hidden');
+    if (isEditing) saveMemo();
+    else setMemoEditMode(true);
   });
 
   // 同期

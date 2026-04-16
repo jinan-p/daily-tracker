@@ -1517,7 +1517,10 @@ body {
 .tl-item.dragging { opacity: 0.35; }
 
 .tl-routine  { border-left: 3px solid var(--primary); }
-.tl-calendar { border-left: 3px solid var(--success); }
+.tl-calendar {
+  border-left: 3px solid #3182CE;
+  background: #EBF8FF;
+}
 .tl-manual   { border-left: 3px solid #F6AD55; }
 .tl-onetime  { border-left: 3px solid #9F7AEA; }
 
@@ -1688,4 +1691,45 @@ body {
   color: var(--text-light);
   margin-bottom: 16px;
   margin-top: -8px;
+}
+
+/* ============================================================
+   パネルカード ドラッグ並び替えインジケーター
+   ============================================================ */
+.routine-card.drag-reorder {
+  border-top: 2px solid var(--primary);
+  margin-top: -2px;
+}
+
+/* ============================================================
+   メモビュー
+   ============================================================ */
+.memo-display {
+  min-height: 200px;
+  line-height: 1.9;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memo-display a {
+  color: var(--primary);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.memo-display a:hover { color: var(--primary-dark); }
+
+.memo-empty {
+  color: var(--text-light);
+  font-style: italic;
+}
+
+.memo-textarea {
+  width: 100%;
+  min-height: 300px;
+  font-size: 14px;
+  line-height: 1.9;
+  resize: vertical;
+  font-family: inherit;
 }

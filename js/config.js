@@ -30,6 +30,7 @@ const CONFIG = {
     USER_NAME:    'dt_user_name',
     USER_EMAIL:   'dt_user_email',
     SETUP_DONE:   'dt_setup_done',
+    MEMO:         'dt_memo',
   },
 };
 

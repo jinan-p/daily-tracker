@@ -82,6 +82,9 @@
       <li class="nav-item" data-view="routines">
         <span class="nav-icon">🔄</span><span class="nav-label">ルーティン設定</span>
       </li>
+      <li class="nav-item" data-view="memo">
+        <span class="nav-icon">📝</span><span class="nav-label">メモ</span>
+      </li>
     </ul>
     <div class="sidebar-footer">
       <div class="user-info" id="userInfo">
@@ -140,6 +143,24 @@
       </div>
     </section>
 
+    <!-- ===== メモビュー ===== -->
+    <section id="memoView" class="view hidden">
+      <div class="view-padded">
+        <div class="view-header">
+          <div>
+            <h1>📝 メモ</h1>
+            <p class="view-sub">リンクやToDoを自由に記録できます。URLは自動でリンクになります。</p>
+          </div>
+          <button class="btn-primary btn-save-eval" id="btnMemoEdit">編集</button>
+        </div>
+        <div class="card">
+          <div id="memoDisplay" class="memo-display"></div>
+          <textarea id="memoTextarea" class="form-input memo-textarea hidden"
+            placeholder="ここにメモを書いてください。URLは自動でリンクになります。&#10;&#10;例：&#10;- やりたいこと&#10;- https://example.com"></textarea>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== ルーティン設定ビュー ===== -->
     <section id="routinesView" class="view hidden">
       <div class="view-padded">
@@ -184,10 +205,6 @@
         <option value="仕事">💼 仕事・副業</option>
         <option value="その他">✨ その他</option>
       </select>
-    </div>
-    <div class="form-group">
-      <label>目標時間（任意）</label>
-      <input type="text" id="routineDuration" class="form-input" placeholder="例：30分">
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="btnCancelRoutine">キャンセル</button>
