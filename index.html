@@ -119,13 +119,19 @@
 
         <!-- 今日のタイムライン -->
         <div class="timeline-col-wrap">
-          <div class="timeline-col-header" id="todayLabel">今日</div>
+          <div class="timeline-col-header">
+            <button class="btn-nav" id="btnNavPrev" title="前の日へ">←</button>
+            <span id="todayLabel">今日</span>
+          </div>
           <div id="todayTimeline" class="timeline-col-body"></div>
         </div>
 
         <!-- 明日のタイムライン -->
         <div class="timeline-col-wrap">
-          <div class="timeline-col-header" id="tomorrowLabel">明日</div>
+          <div class="timeline-col-header">
+            <span id="tomorrowLabel">明日</span>
+            <button class="btn-nav" id="btnNavNext" title="次の日へ">→</button>
+          </div>
           <div id="tomorrowTimeline" class="timeline-col-body"></div>
         </div>
 

@@ -1366,14 +1366,57 @@ body {
 .timeline-col-wrap:last-child { border-right: none; }
 
 .timeline-col-header {
-  padding: 12px 16px;
+  padding: 8px 12px;
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
   border-bottom: 2px solid var(--primary);
   background: var(--card-bg);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+/* ← → ナビゲーションボタン */
+.btn-nav {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+  color: var(--text);
+  line-height: 1;
+}
+
+.btn-nav:hover:not(:disabled) {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.btn-nav:disabled { cursor: not-allowed; }
+
+#todayLabel, #tomorrowLabel { flex: 1; }
+#tomorrowLabel { text-align: right; }
+
+/* 読み取り専用列 */
+.tl-readonly .tl-item {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.tl-readonly .tl-item-remove { display: none; }
+.tl-readonly .tl-add-btn { display: none !important; }
+.tl-readonly .tl-score-badge.empty { display: none; }
+.tl-readonly .tl-zone { pointer-events: none; }
 
 .timeline-col-body {
   flex: 1;

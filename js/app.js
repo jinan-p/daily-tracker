@@ -24,8 +24,10 @@ const CATEGORY_ICONS = {
 // ============================================================
 const State = {
   routines:          [],
-  today:             '',
-  tomorrow:          '',
+  today:             '',   // 表示中の左列の日付
+  tomorrow:          '',   // 表示中の右列の日付
+  actualToday:       '',   // 実際の今日（変わらない基準値）
+  dateOffset:        0,    // 0=今日/明日, -1=昨日/今日, ...
   todayTimeline:     [],  // [{itemType, itemId, timeSlot, title, score}]
   tomorrowTimeline:  [],
   todayCalEvents:    [],
@@ -47,6 +49,22 @@ function tomorrowStr() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// dateStr から n 日後（負なら過去）の日付文字列を返す
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// 左列ラベル：今日基準なら「今日」、前後なら日付
+function colLabel(dateStr, actualToday) {
+  const diff = Math.round((new Date(dateStr + 'T00:00:00') - new Date(actualToday + 'T00:00:00')) / 86400000);
+  if (diff === 0) return '今日 ' + formatDateJP(dateStr);
+  if (diff === 1) return '明日 ' + formatDateJP(dateStr);
+  if (diff === -1) return '昨日 ' + formatDateJP(dateStr);
+  return (diff < 0 ? `${Math.abs(diff)}日前 ` : `${diff}日後 `) + formatDateJP(dateStr);
 }
 
 function formatDateJP(dateStr) {
@@ -211,21 +229,24 @@ async function launchApp() {
   document.getElementById('userName').textContent   = name;
   document.getElementById('userAvatar').textContent = name[0] || 'U';
 
-  State.today    = todayStr();
+  State.actualToday = todayStr();
+  State.dateOffset  = 0;
+  State.today    = State.actualToday;
   State.tomorrow = tomorrowStr();
 
-  document.getElementById('todayLabel').textContent    = '今日 ' + formatDateJP(State.today);
-  document.getElementById('tomorrowLabel').textContent = '明日 ' + formatDateJP(State.tomorrow);
-
-  // データ読み込み前に空グリッドを先に表示する
   renderAll();
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
 
-  // トークンが期限切れの場合はユーザー操作を促すだけ（自動ポップアップはブラウザにブロックされる）
+  // サイレント再認証を試みる（Googleにログイン済みならポップアップなしで成功）
   if (Auth.isExpired()) {
-    showToast('右下の🔄ボタンを押してGoogleにサインインしてください', 'error');
-    return;
+    try {
+      await Auth.silentSignIn();
+    } catch (_) {
+      // サイレント失敗 → 手動ボタンを促す
+      showToast('右下の🔄ボタンを押してGoogleにサインインしてください', 'error');
+      return;
+    }
   }
 
   try {
@@ -281,6 +302,46 @@ async function loadAll() {
   } catch (e) {
     renderAll();
     showToast('読み込みエラー: ' + e.message + ' — 同期ボタン🔄で再試行', 'error');
+  }
+}
+
+// ============================================================
+// 日付ナビゲーション（← → ボタン）
+// ============================================================
+async function navigateDates(delta) {
+  State.dateOffset  += delta;
+  State.today    = addDays(State.actualToday, State.dateOffset);
+  State.tomorrow = addDays(State.actualToday, State.dateOffset + 1);
+
+  // 表示だけ先に更新
+  State.todayTimeline    = [];
+  State.tomorrowTimeline = [];
+  renderAll();
+
+  // データを再取得
+  try {
+    const [todayTl, tomorrowTl] = await Promise.all([
+      Sheets.getTimeline(State.today),
+      Sheets.getTimeline(State.tomorrow),
+    ]);
+    State.todayTimeline    = todayTl;
+    State.tomorrowTimeline = tomorrowTl;
+
+    // カレンダーも再取得（失敗しても続行）
+    try {
+      const [todayCal, tomorrowCal] = await Promise.all([
+        Calendar.getEvents(State.today),
+        Calendar.getEvents(State.tomorrow),
+      ]);
+      State.todayCalEvents    = todayCal;
+      State.tomorrowCalEvents = tomorrowCal;
+      mergeCalEvents(State.todayTimeline,    todayCal);
+      mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+    } catch (_) {}
+
+    renderAll();
+  } catch (e) {
+    showToast('読み込みエラー: ' + e.message, 'error');
   }
 }
 
@@ -360,14 +421,17 @@ function renderTimeline(containerId, timeline, date) {
 
   // ヘッダーの合計点を更新
   const labelId = containerId === 'todayTimeline' ? 'todayLabel' : 'tomorrowLabel';
-  const prefix  = containerId === 'todayTimeline'
-    ? '今日 ' + formatDateJP(State.today)
-    : '明日 ' + formatDateJP(State.tomorrow);
+  const prefix  = colLabel(date, State.actualToday);
   const totalScore = calcDayScore(timeline);
   const scoredItems = timeline.filter(i => i.score !== null && i.score !== undefined);
   const scoreText = scoredItems.length > 0 ? `　合計: ${totalScore}点` : '';
   document.getElementById(labelId).innerHTML =
     `${prefix}<span class="header-score">${scoreText}</span>`;
+
+  // 過去の日付は読み取り専用（actualToday より前）
+  const isPast = date < State.actualToday;
+  const colBody = container.parentElement;
+  colBody.classList.toggle('tl-readonly', isPast);
 
   container.innerHTML = TIME_SLOTS.map(slot => {
     const isHour = slot.endsWith(':00');
@@ -384,35 +448,44 @@ function renderTimeline(containerId, timeline, date) {
       </div>`;
   }).join('');
 
-  container.querySelectorAll('.tl-zone').forEach(zone => {
-    zone.addEventListener('dragover',  onSlotDragOver);
-    zone.addEventListener('dragleave', onSlotDragLeave);
-    zone.addEventListener('drop',      onSlotDrop);
-  });
+  if (!isPast) {
+    container.querySelectorAll('.tl-zone').forEach(zone => {
+      zone.addEventListener('dragover',  onSlotDragOver);
+      zone.addEventListener('dragleave', onSlotDragLeave);
+      zone.addEventListener('drop',      onSlotDrop);
+    });
+  }
 
   container.querySelectorAll('.tl-item').forEach(el => {
-    el.addEventListener('dragstart', onItemDragStart);
-    el.addEventListener('dragend',   onItemDragEnd);
+    if (!isPast) {
+      el.addEventListener('dragstart', onItemDragStart);
+      el.addEventListener('dragend',   onItemDragEnd);
+    } else {
+      el.setAttribute('draggable', 'false');
+    }
     el.addEventListener('click', e => {
+      if (isPast) return;
       if (e.target.closest('.tl-item-remove')) return;
       e.stopPropagation();
       openScorePicker(el.dataset.id, el.dataset.slot, el.dataset.date, el);
     });
   });
 
-  container.querySelectorAll('.tl-item-remove').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      removeTimelineItem(btn.dataset.id, btn.dataset.slot, btn.dataset.date);
+  if (!isPast) {
+    container.querySelectorAll('.tl-item-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        removeTimelineItem(btn.dataset.id, btn.dataset.slot, btn.dataset.date);
+      });
     });
-  });
 
-  container.querySelectorAll('.tl-add-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      openManualTaskModal(btn.dataset.slot, btn.dataset.date);
+    container.querySelectorAll('.tl-add-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openManualTaskModal(btn.dataset.slot, btn.dataset.date);
+      });
     });
-  });
+  }
 }
 
 function renderTlItem(item, date) {
@@ -828,6 +901,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 同期
   document.getElementById('btnSync').addEventListener('click', loadAll);
+
+  // 日付ナビゲーション
+  document.getElementById('btnNavPrev').addEventListener('click', () => navigateDates(-1));
+  document.getElementById('btnNavNext').addEventListener('click', () => navigateDates(+1));
 
   // モーダルオーバーレイクリックで閉じる
   ['routineModal', 'settingsModal'].forEach(id => {

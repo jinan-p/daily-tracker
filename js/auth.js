@@ -69,6 +69,40 @@ const Auth = {
   },
 
   // ------------------------------------------------------------
+  // サイレント再認証（ポップアップなし・既存Googleセッション利用）
+  // ページ読み込み時に自動で呼ぶ。Googleにログイン中なら成功する。
+  // ------------------------------------------------------------
+  silentSignIn() {
+    if (this.accessToken && !this.isExpired()) {
+      return Promise.resolve(this.accessToken);
+    }
+    if (!this.tokenClient) {
+      return Promise.reject('tokenClientが未初期化です');
+    }
+    if (this._pendingToken) {
+      return this._pendingToken;
+    }
+    this._pendingToken = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this._pendingToken = null;
+        reject('タイムアウト');
+      }, 8000);
+      this._onSuccess = (res) => {
+        clearTimeout(timer);
+        this._pendingToken = null;
+        resolve(res.access_token);
+      };
+      this._onError = (err) => {
+        clearTimeout(timer);
+        this._pendingToken = null;
+        reject(err);
+      };
+      this.tokenClient.requestAccessToken({ prompt: '' });
+    });
+    return this._pendingToken;
+  },
+
+  // ------------------------------------------------------------
   // アクセストークンを取得（期限切れなら再認証、並列呼び出し対応）
   // ------------------------------------------------------------
   getToken() {
