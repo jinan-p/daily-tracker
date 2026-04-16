@@ -419,14 +419,20 @@ function calcDayScore(timeline) {
 function renderTimeline(containerId, timeline, date) {
   const container = document.getElementById(containerId);
 
-  // ヘッダーの合計点を更新
+  // ヘッダーラベルと合計点を更新
   const labelId = containerId === 'todayTimeline' ? 'todayLabel' : 'tomorrowLabel';
-  const prefix  = colLabel(date, State.actualToday);
   const totalScore = calcDayScore(timeline);
   const scoredItems = timeline.filter(i => i.score !== null && i.score !== undefined);
-  const scoreText = scoredItems.length > 0 ? `　合計: ${totalScore}点` : '';
+  const scoreText = scoredItems.length > 0 ? `　${totalScore}点` : '';
   document.getElementById(labelId).innerHTML =
-    `${prefix}<span class="header-score">${scoreText}</span>`;
+    `${colLabel(date, State.actualToday)}<span class="header-score">${scoreText}</span>`;
+
+  // ナビバーの日付範囲テキストを更新（左列のときだけ）
+  if (containerId === 'todayTimeline') {
+    const tomorrowLabel = colLabel(State.tomorrow, State.actualToday).split(' ')[0];
+    document.getElementById('dateNavRange').textContent =
+      `${formatDateJP(State.today)} 〜 ${formatDateJP(State.tomorrow)}`;
+  }
 
   // 過去の日付は読み取り専用（actualToday より前）
   const isPast = date < State.actualToday;
@@ -902,9 +908,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // 同期
   document.getElementById('btnSync').addEventListener('click', loadAll);
 
-  // 日付ナビゲーション
+  // 日付ナビゲーション（ボタン）
   document.getElementById('btnNavPrev').addEventListener('click', () => navigateDates(-1));
   document.getElementById('btnNavNext').addEventListener('click', () => navigateDates(+1));
+
+  // 日付ナビゲーション（スワイプ）
+  const swipeTarget = document.getElementById('timelineLayout');
+  let swipeStartX = null;
+  swipeTarget.addEventListener('touchstart', e => {
+    swipeStartX = e.touches[0].clientX;
+  }, { passive: true });
+  swipeTarget.addEventListener('touchend', e => {
+    if (swipeStartX === null) return;
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    swipeStartX = null;
+    if (Math.abs(dx) < 50) return; // 50px未満は誤操作として無視
+    navigateDates(dx < 0 ? 1 : -1); // 左スワイプ→次の日、右スワイプ→前の日
+  }, { passive: true });
 
   // モーダルオーバーレイクリックで閉じる
   ['routineModal', 'settingsModal'].forEach(id => {

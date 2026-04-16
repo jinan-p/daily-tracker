@@ -1248,14 +1248,18 @@ body {
 #scheduleView {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .timeline-layout {
   display: grid;
   grid-template-columns: 190px 1fr 1fr;
-  height: 100%;
+  flex: 1;
   overflow: hidden;
   border-top: 1px solid var(--border);
+  /* スワイプ中のちらつきを防ぐ */
+  touch-action: pan-y;
 }
 
 /* ============================================================
@@ -1378,34 +1382,49 @@ body {
   gap: 6px;
 }
 
-/* ← → ナビゲーションボタン */
-.btn-nav {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  width: 28px;
-  height: 28px;
+/* 日付ナビゲーションバー */
+.date-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 8px 20px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.date-nav-range {
   font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 240px;
+  text-align: center;
+  user-select: none;
+}
+
+.btn-date-nav {
+  background: var(--primary-light);
+  border: none;
+  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s;
-  color: var(--text);
-  line-height: 1;
-}
-
-.btn-nav:hover:not(:disabled) {
-  background: var(--primary-light);
-  border-color: var(--primary);
   color: var(--primary);
+  transition: background 0.15s, transform 0.1s;
+  flex-shrink: 0;
 }
 
-.btn-nav:disabled { cursor: not-allowed; }
+.btn-date-nav:hover {
+  background: #DDD9FF;
+  transform: scale(1.1);
+}
 
-#todayLabel, #tomorrowLabel { flex: 1; }
-#tomorrowLabel { text-align: right; }
+.btn-date-nav:active { transform: scale(0.95); }
 
 /* 読み取り専用列 */
 .tl-readonly .tl-item {

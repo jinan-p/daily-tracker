@@ -98,7 +98,15 @@
 
     <!-- ===== スケジュールビュー ===== -->
     <section id="scheduleView" class="view active">
-      <div class="timeline-layout">
+
+      <!-- 日付ナビゲーションバー -->
+      <div class="date-nav-bar">
+        <button class="btn-date-nav" id="btnNavPrev" title="前の日へ">&#8592;</button>
+        <span class="date-nav-range" id="dateNavRange"></span>
+        <button class="btn-date-nav" id="btnNavNext" title="次の日へ">&#8594;</button>
+      </div>
+
+      <div class="timeline-layout" id="timelineLayout">
 
         <!-- 左パネル: ルーティン一覧 -->
         <div class="routines-panel-wrap" id="routinesPanelWrap">
@@ -117,21 +125,15 @@
           <div class="panel-hint">↑ タイムラインへドラッグ</div>
         </div>
 
-        <!-- 今日のタイムライン -->
+        <!-- 左列タイムライン -->
         <div class="timeline-col-wrap">
-          <div class="timeline-col-header">
-            <button class="btn-nav" id="btnNavPrev" title="前の日へ">←</button>
-            <span id="todayLabel">今日</span>
-          </div>
+          <div class="timeline-col-header" id="todayLabel">今日</div>
           <div id="todayTimeline" class="timeline-col-body"></div>
         </div>
 
-        <!-- 明日のタイムライン -->
+        <!-- 右列タイムライン -->
         <div class="timeline-col-wrap">
-          <div class="timeline-col-header">
-            <span id="tomorrowLabel">明日</span>
-            <button class="btn-nav" id="btnNavNext" title="次の日へ">→</button>
-          </div>
+          <div class="timeline-col-header" id="tomorrowLabel">明日</div>
           <div id="tomorrowTimeline" class="timeline-col-body"></div>
         </div>
 
