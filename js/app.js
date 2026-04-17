@@ -14,9 +14,25 @@ const TIME_SLOTS = (() => {
   return slots; // 34スロット: 05:00, 05:30 ... 21:00, 21:30
 })();
 
-const CATEGORY_ICONS = {
-  '健康': '🏃', '学習': '📚', 'メンタル': '🧘',
-  '生活': '🏠', '仕事': '💼', 'その他': '✨',
+const CATEGORIES = [
+  { key: 'ジナンの価値を上げる',        icon: '🚀' },
+  { key: '健康・片付け',                icon: '💪' },
+  { key: 'チーム関係（YouTube・運営）',  icon: '🎥' },
+  { key: '投資・お金',                  icon: '💰' },
+  { key: 'やるべきリスト',              icon: '✅' },
+];
+
+const DEFAULT_PRESETS = {
+  'ジナンの価値を上げる': ['アウトプット', 'おすすめ整理（店・本・動画）', 'AIファイルの整理'],
+  '健康・片付け': ['運動', 'パートナー', '部屋の片付け'],
+  'チーム関係（YouTube・運営）': ['企画シート', 'ざわつかせた地図', 'ジナン業務'],
+  '投資・お金': ['確定申告', '個人簿記', '法人簿記', '銀行整理'],
+  'やるべきリスト': [
+    '船舶免許の住所変更', '山手皮膚科の予約', 'クレカ更新（エニタイム・Zoom）',
+    'ミニミニに確認（太陽光）', '太陽光発電の会社に連絡', 'Google / YouTube住所変更',
+    'プルデンシャル解約', '火災保険の継続→切替', 'デスク購入', 'iPhone購入',
+    '電子レンジ購入', 'ベッド購入', '人に会う（ヨンサン・イチパパ・ツボツボ）',
+  ],
 };
 
 // ============================================================
@@ -97,9 +113,23 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+function loadPresets() {
+  const stored = Store.get(CONFIG.LS.PRESETS);
+  if (stored) {
+    try { return JSON.parse(stored); } catch {}
+  }
+  return JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+}
+
+function savePresets(presets) {
+  Store.set(CONFIG.LS.PRESETS, JSON.stringify(presets));
+}
+
 function getRoutineIcon(routineId) {
   const r = State.routines.find(r => r.id === routineId);
-  return r ? (CATEGORY_ICONS[r.category] || '📌') : '📌';
+  if (!r) return '📌';
+  const cat = CATEGORIES.find(c => c.key === r.category);
+  return cat ? cat.icon : '📌';
 }
 
 // カレンダーの時刻を 30 分単位スロットに丸める
@@ -259,6 +289,35 @@ async function launchApp() {
 }
 
 // ============================================================
+// デフォルトルーティン初期化（初回のみ）
+// ============================================================
+async function initDefaultRoutines() {
+  const defaults = [
+    { name: 'ジナンの価値を上げる',       category: 'ジナンの価値を上げる',
+      items: ['アウトプット', 'おすすめ整理（店・本・動画）', 'AIファイルの整理'] },
+    { name: '健康・片付け',               category: '健康・片付け',
+      items: ['運動', 'パートナー', '部屋の片付け'] },
+    { name: 'チーム関係（YouTube・運営）', category: 'チーム関係（YouTube・運営）',
+      items: ['企画シート', 'ざわつかせた地図', 'ジナン業務'] },
+    { name: '投資・お金',                 category: '投資・お金',
+      items: ['確定申告', '個人簿記', '法人簿記', '銀行整理'] },
+    { name: 'やるべきリスト',             category: 'やるべきリスト',
+      items: ['船舶免許の住所変更', '山手皮膚科の予約', 'クレカ更新（エニタイム・Zoom）',
+              'ミニミニに確認（太陽光）', '太陽光発電の会社に連絡', 'Google / YouTube住所変更',
+              'プルデンシャル解約', '火災保険の継続→切替', 'デスク購入', 'iPhone購入',
+              '電子レンジ購入', 'ベッド購入', '人に会う（ヨンサン・イチパパ・ツボツボ）'] },
+  ];
+  const p = loadPresets();
+  defaults.forEach((d, i) => {
+    const id = genId();
+    State.routines.push({ id, name: d.name, category: d.category, duration: '', active: true, order: i, onetime: false });
+    p[id] = d.items;
+  });
+  savePresets(p);
+  await Sheets.saveAllRoutines(State.routines);
+}
+
+// ============================================================
 // データ読み込み
 // ============================================================
 async function loadAll() {
@@ -283,6 +342,30 @@ async function loadAll() {
     State.todayTimeline   = todayTl;
     State.tomorrowTimeline = tomorrowTl;
 
+    // v2マイグレーション（フラグがなければ必ず1回実行）
+    if (!Store.get('dt_migrated_v2')) {
+      State.routines = State.routines.filter(r => r.onetime);
+      await initDefaultRoutines();
+      // タイムラインをカレンダー以外クリア
+      State.todayTimeline    = State.todayTimeline.filter(i => i.itemType === 'calendar');
+      State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType === 'calendar');
+      await Promise.all([
+        Sheets.saveTimeline(State.today,    State.todayTimeline),
+        Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
+      ]).catch(() => {});
+      Store.set('dt_migrated_v2', '1');
+    }
+
+    // 存在しないルーティンIDのタイムライン項目を削除（安全策）
+    const validIds = new Set(State.routines.map(r => r.id));
+    const cleanTimeline = tl => tl.filter(i => i.itemType !== 'routine' || validIds.has(i.itemId));
+    const todayCleaned    = State.todayTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId));
+    const tomorrowCleaned = State.tomorrowTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId));
+    State.todayTimeline    = cleanTimeline(State.todayTimeline);
+    State.tomorrowTimeline = cleanTimeline(State.tomorrowTimeline);
+    if (todayCleaned)    await Sheets.saveTimeline(State.today,    State.todayTimeline).catch(() => {});
+    if (tomorrowCleaned) await Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline).catch(() => {});
+
     // カレンダーを自動取得（失敗しても続行）
     try {
       const [todayCal, tomorrowCal] = await Promise.all([
@@ -297,12 +380,6 @@ async function loadAll() {
       console.warn('カレンダー取得エラー:', calErr);
       showToast('カレンダー取得失敗: ' + calErr.message, 'error');
     }
-
-    // ルーティン自動配置（未配置分のみ）
-    const todayAdded    = autoFillRoutines(State.todayTimeline);
-    const tomorrowAdded = autoFillRoutines(State.tomorrowTimeline);
-    if (todayAdded)    scheduleSave(State.today);
-    if (tomorrowAdded) scheduleSave(State.tomorrow);
 
     renderAll();
     showToast('読み込み完了 ✅');
@@ -346,40 +423,10 @@ async function navigateDates(delta) {
       mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
     } catch (_) {}
 
-    // ルーティン自動配置（未配置分のみ）
-    const todayAdded    = autoFillRoutines(State.todayTimeline);
-    const tomorrowAdded = autoFillRoutines(State.tomorrowTimeline);
-    if (todayAdded)    scheduleSave(State.today);
-    if (tomorrowAdded) scheduleSave(State.tomorrow);
-
     renderAll();
   } catch (e) {
     showToast('読み込みエラー: ' + e.message, 'error');
   }
-}
-
-// ============================================================
-// ルーティン自動配置（05:00から空きスロットへ順番に配置）
-// 既に配置済み・スロットが埋まっている場合はスキップ
-// 追加があった場合は true を返す
-// ============================================================
-function autoFillRoutines(timeline) {
-  const activeRoutines = State.routines.filter(r => r.active && !r.onetime);
-  if (activeRoutines.length === 0) return false;
-
-  const placedIds     = new Set(timeline.filter(i => i.itemType === 'routine').map(i => i.itemId));
-  const occupiedSlots = new Set(timeline.map(i => i.timeSlot));
-
-  let added = false;
-  for (const r of activeRoutines) {
-    if (placedIds.has(r.id)) continue;
-    const slot = TIME_SLOTS.find(s => !occupiedSlots.has(s));
-    if (!slot) break;
-    timeline.push({ itemType: 'routine', itemId: r.id, timeSlot: slot, title: r.name, score: null });
-    occupiedSlots.add(slot);
-    added = true;
-  }
-  return added;
 }
 
 // カレンダーイベントをタイムラインへ自動配置（未配置のものだけ）
@@ -406,8 +453,10 @@ function renderAll() {
   renderRoutineSettings();
 }
 
+// ============================================================
+// 左パネル レンダリング
+// ============================================================
 function renderRoutinesPanel() {
-  // タブ切り替えボタンを更新
   document.querySelectorAll('.panel-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === State.panelTab);
   });
@@ -415,38 +464,90 @@ function renderRoutinesPanel() {
   document.getElementById('btnAddOnetimePanel').classList.toggle('hidden', State.panelTab !== 'onetime');
 
   const container = document.getElementById('routinesPanel');
-  const items = State.panelTab === 'onetime'
-    ? State.routines.filter(r => r.onetime)
-    : State.routines.filter(r => r.active && !r.onetime);
 
-  if (items.length === 0) {
-    container.innerHTML = State.panelTab === 'onetime'
-      ? '<div class="empty-state">単発タスクを追加してください</div>'
-      : '<div class="empty-state">ルーティンを追加してください</div>';
+  // 単発タブ: 従来通り
+  if (State.panelTab === 'onetime') {
+    const items = State.routines.filter(r => r.onetime);
+    if (items.length === 0) {
+      container.innerHTML = '<div class="empty-state">単発タスクを追加してください</div>';
+      return;
+    }
+    container.innerHTML = items.map(r => {
+      const safeTitle = r.name.replace(/"/g, '&quot;');
+      return `
+        <div class="routine-card onetime-card" draggable="true"
+             data-type="onetime" data-id="${r.id}"
+             data-slot="unplaced" data-date="unplaced"
+             data-title="${safeTitle}">
+          <span class="routine-card-icon">⚡</span>
+          <span class="routine-card-name">${r.name}</span>
+        </div>`;
+    }).join('');
+    container.querySelectorAll('.routine-card').forEach(el => {
+      el.addEventListener('dragstart', onItemDragStart);
+      el.addEventListener('dragend',   onItemDragEnd);
+      el.addEventListener('dragover',  onPanelCardDragOver);
+      el.addEventListener('dragleave', onPanelCardDragLeave);
+      el.addEventListener('drop',      onPanelCardDrop);
+    });
     return;
   }
 
-  const cardType = State.panelTab === 'onetime' ? 'onetime' : 'routine';
-  container.innerHTML = items.map(r => {
-    const safeTitle = r.name.replace(/"/g, '&quot;');
+  // ルーティンタブ: 5つの固定カード（プルダウン付き）
+  const routines = State.routines.filter(r => r.active && !r.onetime);
+  if (routines.length === 0) {
+    container.innerHTML = '<div class="empty-state">ルーティン設定からルーティンを追加してください</div>';
+    return;
+  }
+
+  const presets = loadPresets();
+  container.innerHTML = routines.map(r => {
+    const icon    = CATEGORIES.find(c => c.key === r.category)?.icon || '📌';
+    const items   = presets[r.id] || [];
+    const options = items.length > 0
+      ? items.map(item => `<option value="${item.replace(/"/g, '&quot;')}">${item}</option>`).join('')
+      : '<option value="">（項目なし）</option>';
     return `
-      <div class="routine-card ${State.panelTab === 'onetime' ? 'onetime-card' : ''}" draggable="true"
-           data-type="${cardType}" data-id="${r.id}"
-           data-slot="unplaced" data-date="unplaced"
-           data-title="${safeTitle}">
-        <span class="routine-card-icon">${State.panelTab === 'onetime' ? '⚡' : (CATEGORY_ICONS[r.category] || '📌')}</span>
-        <span class="routine-card-name">${r.name}</span>
+      <div class="routine-card routine-card-v2" draggable="true"
+           data-type="routine" data-id="${r.id}"
+           data-slot="unplaced" data-date="unplaced">
+        <div class="routine-card-top">
+          <span class="routine-card-icon">${icon}</span>
+          <span class="routine-card-name">${r.name}</span>
+        </div>
+        <select class="routine-card-select">${options}</select>
       </div>`;
   }).join('');
 
-  container.querySelectorAll('.routine-card').forEach(el => {
-    el.addEventListener('dragstart', onItemDragStart);
+  container.querySelectorAll('.routine-card-v2').forEach(el => {
+    el.addEventListener('dragstart', onRoutineV2DragStart);
     el.addEventListener('dragend',   onItemDragEnd);
-    // パネル内並び替え
     el.addEventListener('dragover',  onPanelCardDragOver);
     el.addEventListener('dragleave', onPanelCardDragLeave);
     el.addEventListener('drop',      onPanelCardDrop);
+    // selectをクリックしてもドラッグが始まらないように
+    el.querySelector('.routine-card-select').addEventListener('mousedown', e => e.stopPropagation());
   });
+}
+
+function onRoutineV2DragStart(e) {
+  const el     = e.currentTarget;
+  const select = el.querySelector('.routine-card-select');
+  const title  = select ? select.value.trim() : '';
+  if (!title) {
+    e.preventDefault();
+    showToast('プルダウンで項目を選んでからドラッグしてください', 'error');
+    return;
+  }
+  State.dragging = {
+    itemType: 'routine',
+    itemId:   el.dataset.id,
+    title,
+    fromSlot: 'unplaced',
+    fromDate: 'unplaced',
+  };
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => el.classList.add('dragging'), 0);
 }
 
 // 日別合計点を計算
@@ -795,31 +896,49 @@ function addManualTask() {
 }
 
 // ============================================================
-// ルーティン設定ビュー
+// ルーティン設定ビュー（プリセット管理込み）
 // ============================================================
 function renderRoutineSettings() {
   const container = document.getElementById('routineSettings');
-  if (State.routines.length === 0) {
-    container.innerHTML = '<div class="empty-state">まだルーティンがありません</div>';
+  const routines  = State.routines.filter(r => !r.onetime);
+  if (routines.length === 0) {
+    container.innerHTML = '<div class="empty-state">まだルーティンがありません。上の「追加」ボタンから始めましょう！</div>';
     return;
   }
 
-  container.innerHTML = State.routines.map(r => `
-    <div class="routine-setting-item ${r.active ? '' : 'inactive'}" data-id="${r.id}">
-      <span class="drag-handle">⠿</span>
-      <div class="routine-setting-info">
-        <div class="routine-setting-name">${r.name}</div>
-        <div class="routine-setting-meta">${r.category}</div>
-      </div>
-      <div class="routine-setting-actions">
-        <label class="toggle-switch">
-          <input type="checkbox" ${r.active ? 'checked' : ''} data-id="${r.id}" class="routine-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-        <button class="btn-edit"   data-id="${r.id}">編集</button>
-        <button class="btn-delete" data-id="${r.id}">削除</button>
-      </div>
-    </div>`).join('');
+  const presets = loadPresets();
+  container.innerHTML = routines.map(r => {
+    const icon  = CATEGORIES.find(c => c.key === r.category)?.icon || '📌';
+    const items = presets[r.id] || [];
+    const tagsHtml = items.map((item, idx) => `
+      <span class="preset-tag">
+        ${item}
+        <button class="preset-tag-del" data-id="${r.id}" data-idx="${idx}">✕</button>
+      </span>`).join('');
+    return `
+      <div class="routine-setting-item ${r.active ? '' : 'inactive'}" data-id="${r.id}">
+        <div class="routine-setting-header">
+          <span class="routine-setting-icon">${icon}</span>
+          <span class="routine-setting-name">${r.name}</span>
+          <div class="routine-setting-actions">
+            <label class="toggle-switch">
+              <input type="checkbox" ${r.active ? 'checked' : ''} data-id="${r.id}" class="routine-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+            <button class="btn-edit"   data-id="${r.id}">編集</button>
+            <button class="btn-delete" data-id="${r.id}">削除</button>
+          </div>
+        </div>
+        <div class="preset-items">
+          ${tagsHtml || '<span class="preset-empty">項目なし</span>'}
+        </div>
+        <div class="preset-add-row">
+          <input type="text" class="form-input preset-add-input"
+                 placeholder="項目を追加…" data-id="${r.id}">
+          <button class="btn-secondary preset-add-btn" data-id="${r.id}">＋ 追加</button>
+        </div>
+      </div>`;
+  }).join('');
 
   container.querySelectorAll('.routine-toggle').forEach(el => {
     el.addEventListener('change', () => toggleRoutineActive(el.dataset.id, el.checked));
@@ -830,6 +949,42 @@ function renderRoutineSettings() {
   container.querySelectorAll('.btn-delete').forEach(el => {
     el.addEventListener('click', () => deleteRoutine(el.dataset.id));
   });
+  container.querySelectorAll('.preset-tag-del').forEach(btn => {
+    btn.addEventListener('click', () =>
+      deletePresetItem(btn.dataset.id, parseInt(btn.dataset.idx, 10)));
+  });
+  container.querySelectorAll('.preset-add-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = container.querySelector(`.preset-add-input[data-id="${btn.dataset.id}"]`);
+      if (input) addPresetItemById(btn.dataset.id, input.value.trim(), input);
+    });
+  });
+  container.querySelectorAll('.preset-add-input').forEach(input => {
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addPresetItemById(input.dataset.id, input.value.trim(), input);
+    });
+  });
+}
+
+function deletePresetItem(routineId, idx) {
+  const p = loadPresets();
+  if (!p[routineId]) return;
+  p[routineId].splice(idx, 1);
+  savePresets(p);
+  renderRoutineSettings();
+  renderRoutinesPanel();
+}
+
+function addPresetItemById(routineId, value, inputEl) {
+  if (!value) return;
+  const p = loadPresets();
+  if (!p[routineId]) p[routineId] = [];
+  p[routineId].push(value);
+  savePresets(p);
+  if (inputEl) inputEl.value = '';
+  renderRoutineSettings();
+  renderRoutinesPanel();
+  showToast('項目を追加しました ✅');
 }
 
 async function toggleRoutineActive(routineId, active) {
@@ -844,12 +999,12 @@ async function toggleRoutineActive(routineId, active) {
 function openAddRoutine(isOnetime = false) {
   State.editRoutineId = null;
   document.getElementById('routineModalTitle').textContent = isOnetime ? '単発タスクを追加' : 'ルーティンを追加';
-  document.getElementById('routineName').value     = '';
-  document.getElementById('routineCategory').value = '健康';
   document.getElementById('routineOnetimeFlag').value = isOnetime ? '1' : '0';
-  // 単発タスクはカテゴリ不要なので非表示
+  document.getElementById('routineName').value     = '';
+  document.getElementById('routineCategory').value = CATEGORIES[0].key;
   document.getElementById('routineCategoryGroup').style.display = isOnetime ? 'none' : '';
   openModal('routineModal');
+  setTimeout(() => document.getElementById('routineName').focus(), 50);
 }
 
 function openEditRoutine(routineId) {
@@ -857,15 +1012,18 @@ function openEditRoutine(routineId) {
   if (!r) return;
   State.editRoutineId = routineId;
   document.getElementById('routineModalTitle').textContent = 'ルーティンを編集';
-  document.getElementById('routineName').value     = r.name;
-  document.getElementById('routineCategory').value = r.category;
+  document.getElementById('routineOnetimeFlag').value      = r.onetime ? '1' : '0';
+  document.getElementById('routineName').value             = r.name;
+  document.getElementById('routineCategory').value         = r.category || CATEGORIES[0].key;
+  document.getElementById('routineCategoryGroup').style.display = r.onetime ? 'none' : '';
   openModal('routineModal');
+  setTimeout(() => document.getElementById('routineName').focus(), 50);
 }
 
 async function saveRoutine() {
   const name      = document.getElementById('routineName').value.trim();
-  const category  = document.getElementById('routineCategory').value;
   const isOnetime = document.getElementById('routineOnetimeFlag').value === '1';
+  const category  = isOnetime ? 'その他' : document.getElementById('routineCategory').value;
   if (!name) { showToast('名前を入力してください', 'error'); return; }
 
   if (State.editRoutineId) {
@@ -879,7 +1037,7 @@ async function saveRoutine() {
   renderAll();
   try {
     await Sheets.saveAllRoutines(State.routines);
-    showToast('ルーティンを保存しました ✅');
+    showToast('保存しました ✅');
   } catch (e) {
     showToast('保存エラー: ' + e.message, 'error');
   }

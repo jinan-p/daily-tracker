@@ -31,6 +31,8 @@ const CONFIG = {
     USER_EMAIL:   'dt_user_email',
     SETUP_DONE:   'dt_setup_done',
     MEMO:         'dt_memo',
+    PRESETS:      'dt_presets',
+    MIGRATED_V2:  'dt_migrated_v2',
   },
 };
 
