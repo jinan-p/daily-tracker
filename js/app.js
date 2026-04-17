@@ -342,8 +342,8 @@ async function loadAll() {
     State.todayTimeline   = todayTl;
     State.tomorrowTimeline = tomorrowTl;
 
-    // v2マイグレーション（フラグがなければ必ず1回実行）
-    if (!Store.get('dt_migrated_v2')) {
+    // v3マイグレーション（フラグがなければ必ず1回実行）
+    if (!Store.get('dt_migrated_v3')) {
       State.routines = State.routines.filter(r => r.onetime);
       await initDefaultRoutines();
       // タイムラインをカレンダー以外クリア
@@ -353,7 +353,7 @@ async function loadAll() {
         Sheets.saveTimeline(State.today,    State.todayTimeline),
         Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
       ]).catch(() => {});
-      Store.set('dt_migrated_v2', '1');
+      Store.set('dt_migrated_v3', '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）
