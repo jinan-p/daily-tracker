@@ -51,6 +51,7 @@ const State = {
   dragging:          null,
   editRoutineId:     null,
   panelTab:          'routine',  // 'routine' | 'onetime'
+  routineSelections: {},         // { [routineId]: selectedIndex }
 };
 
 // ============================================================
@@ -504,8 +505,9 @@ function renderRoutinesPanel() {
   container.innerHTML = routines.map(r => {
     const icon    = CATEGORIES.find(c => c.key === r.category)?.icon || '📌';
     const items   = presets[r.id] || [];
+    const currentIdx = State.routineSelections[r.id] ?? 0;
     const options = items.length > 0
-      ? items.map(item => `<option value="${item.replace(/"/g, '&quot;')}">${item}</option>`).join('')
+      ? items.map((item, idx) => `<option value="${item.replace(/"/g, '&quot;')}" ${idx === currentIdx ? 'selected' : ''}>${item}</option>`).join('')
       : '<option value="">（項目なし）</option>';
     return `
       <div class="routine-card routine-card-v2" draggable="true"
@@ -724,6 +726,16 @@ function onSlotDrop(e) {
   // 新しい位置に追加
   const targetTl = toDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
   targetTl.push({ itemType, itemId, timeSlot: toSlot, title, score: null });
+
+  // ルーティンパネルからのドロップなら選択を次の項目へ進める
+  if (fromDate === 'unplaced' && itemType === 'routine') {
+    const presets = loadPresets();
+    const items = presets[itemId] || [];
+    if (items.length > 0) {
+      const currentIdx = State.routineSelections[itemId] ?? 0;
+      State.routineSelections[itemId] = (currentIdx + 1) % items.length;
+    }
+  }
 
   // 単発タスクはパネルから削除
   if (fromDate === 'unplaced' && itemType === 'onetime') {
