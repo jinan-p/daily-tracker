@@ -1527,6 +1527,24 @@ body {
 .tl-item-icon { font-size: 14px; flex-shrink: 0; }
 .tl-item-name { flex: 1; color: var(--text); font-weight: 500; }
 
+.tl-item-select {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0 2px;
+  min-width: 0;
+}
+
+.tl-item-select:focus {
+  outline: 1px solid var(--primary);
+  border-radius: 4px;
+}
+
 .tl-score-badge {
   font-size: 11px;
   font-weight: 700;

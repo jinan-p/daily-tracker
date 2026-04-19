@@ -615,12 +615,28 @@ function renderTimeline(containerId, timeline, date) {
     el.addEventListener('click', e => {
       if (isPast) return;
       if (e.target.closest('.tl-item-remove')) return;
+      if (e.target.closest('.tl-item-select')) return;
       e.stopPropagation();
       openScorePicker(el.dataset.id, el.dataset.slot, el.dataset.date, el);
     });
   });
 
   if (!isPast) {
+    container.querySelectorAll('.tl-item-select').forEach(sel => {
+      sel.addEventListener('mousedown', e => e.stopPropagation());
+      sel.addEventListener('click',     e => e.stopPropagation());
+      sel.addEventListener('change', e => {
+        e.stopPropagation();
+        const tl = sel.dataset.date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+        const item = tl.find(i => i.itemId === sel.dataset.id && i.timeSlot === sel.dataset.slot);
+        if (item) {
+          item.title = sel.value;
+          sel.closest('.tl-item').dataset.title = sel.value;
+          scheduleSave(sel.dataset.date);
+        }
+      });
+    });
+
     container.querySelectorAll('.tl-item-remove').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -653,13 +669,28 @@ function renderTlItem(item, date) {
     ? `<span class="tl-score-badge">${item.score}点</span>`
     : `<span class="tl-score-badge empty">採点</span>`;
 
+  let titleHtml;
+  if (item.itemType === 'routine') {
+    const routineItems = (loadPresets()[item.itemId]) || [];
+    if (routineItems.length > 0) {
+      const opts = routineItems.map(i =>
+        `<option value="${i.replace(/"/g, '&quot;')}" ${i === item.title ? 'selected' : ''}>${i}</option>`
+      ).join('');
+      titleHtml = `<select class="tl-item-select" data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}">${opts}</select>`;
+    } else {
+      titleHtml = `<span class="tl-item-name">${item.title}</span>`;
+    }
+  } else {
+    titleHtml = `<span class="tl-item-name">${item.title}</span>`;
+  }
+
   return `
     <div class="tl-item ${cls}" draggable="true"
          data-type="${item.itemType}" data-id="${item.itemId}"
          data-slot="${item.timeSlot}" data-date="${date}"
          data-title="${safe}">
       <span class="tl-item-icon">${icon}</span>
-      <span class="tl-item-name">${item.title}</span>
+      ${titleHtml}
       ${scoreLabel}
       <button class="tl-item-remove"
               data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}">✕</button>
