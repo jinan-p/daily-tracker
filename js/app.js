@@ -38,6 +38,8 @@ const DEFAULT_PRESETS = {
 // ============================================================
 // 状態
 // ============================================================
+let _presetDrag = null; // プリセット項目ドラッグ状態 { routineId, fromIdx }
+
 const State = {
   routines:          [],
   today:             '',   // 表示中の左列の日付
@@ -954,7 +956,8 @@ function renderRoutineSettings() {
     const icon  = CATEGORIES.find(c => c.key === r.category)?.icon || '📌';
     const items = presets[r.id] || [];
     const tagsHtml = items.map((item, idx) => `
-      <span class="preset-tag">
+      <span class="preset-tag" draggable="true" data-routine-id="${r.id}" data-idx="${idx}">
+        <span class="preset-tag-handle">⠿</span>
         ${item}
         <button class="preset-tag-del" data-id="${r.id}" data-idx="${idx}">✕</button>
       </span>`).join('');
@@ -1004,8 +1007,48 @@ function renderRoutineSettings() {
   });
   container.querySelectorAll('.preset-add-input').forEach(input => {
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') addPresetItemById(input.dataset.id, input.value.trim(), input);
+      if (e.key === 'Enter' && !e.isComposing) addPresetItemById(input.dataset.id, input.value.trim(), input);
     });
+  });
+
+  // プリセットタグのドラッグ&ドロップ並び替え
+  container.querySelectorAll('.preset-tag[draggable]').forEach(tag => {
+    tag.addEventListener('dragstart', e => {
+      e.stopPropagation();
+      _presetDrag = { routineId: tag.dataset.routineId, fromIdx: parseInt(tag.dataset.idx, 10) };
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => tag.classList.add('preset-tag-dragging'), 0);
+    });
+    tag.addEventListener('dragend', () => {
+      tag.classList.remove('preset-tag-dragging');
+      _presetDrag = null;
+    });
+    tag.addEventListener('dragover', e => {
+      if (!_presetDrag || _presetDrag.routineId !== tag.dataset.routineId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      tag.classList.add('preset-tag-over');
+    });
+    tag.addEventListener('dragleave', () => tag.classList.remove('preset-tag-over'));
+    tag.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      tag.classList.remove('preset-tag-over');
+      if (!_presetDrag) return;
+      const toIdx = parseInt(tag.dataset.idx, 10);
+      if (_presetDrag.fromIdx === toIdx) { _presetDrag = null; return; }
+      const p = loadPresets();
+      const items = p[_presetDrag.routineId];
+      if (!items) { _presetDrag = null; return; }
+      const [moved] = items.splice(_presetDrag.fromIdx, 1);
+      items.splice(toIdx, 0, moved);
+      savePresets(p);
+      _presetDrag = null;
+      renderRoutineSettings();
+      renderRoutinesPanel();
+    });
+    // ✕ボタンがドラッグを誤発火させないように
+    tag.querySelector('.preset-tag-del').addEventListener('mousedown', e => e.stopPropagation());
   });
 }
 
