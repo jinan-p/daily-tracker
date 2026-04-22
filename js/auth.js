@@ -6,6 +6,7 @@ const Auth = {
   tokenClient: null,
   accessToken: null,
   _pendingToken: null,
+  _refreshTimer: null,
 
   // ------------------------------------------------------------
   // 初期化：Google Identity Services のクライアントを作る
@@ -32,8 +33,11 @@ const Auth = {
         }
         Auth.accessToken = response.access_token;
         // 有効期限を保存（1時間）
+        const expMs = (response.expires_in - 60) * 1000;
         Store.set(CONFIG.LS.ACCESS_TOKEN, response.access_token);
-        Store.set(CONFIG.LS.TOKEN_EXP, Date.now() + (response.expires_in - 60) * 1000);
+        Store.set(CONFIG.LS.TOKEN_EXP, Date.now() + expMs);
+        // 期限の10分前にこっそりリフレッシュ
+        Auth._scheduleRefresh(expMs);
         Auth._onSuccess(response);
       },
     });
@@ -57,7 +61,7 @@ const Auth = {
       return;
     }
 
-    this.tokenClient.requestAccessToken({ prompt: '' });
+    this.tokenClient.requestAccessToken({ prompt: '', login_hint: Store.get(CONFIG.LS.USER_EMAIL) || '' });
   },
 
   // ------------------------------------------------------------
@@ -97,9 +101,21 @@ const Auth = {
         this._pendingToken = null;
         reject(err);
       };
-      this.tokenClient.requestAccessToken({ prompt: '' });
+      this.tokenClient.requestAccessToken({ prompt: '', login_hint: Store.get(CONFIG.LS.USER_EMAIL) || '' });
     });
     return this._pendingToken;
+  },
+
+  // ------------------------------------------------------------
+  // 期限の10分前にサイレントリフレッシュをスケジュール
+  // ------------------------------------------------------------
+  _scheduleRefresh(expMs) {
+    if (this._refreshTimer) clearTimeout(this._refreshTimer);
+    const delay = Math.max(expMs - 10 * 60 * 1000, 30 * 1000); // 10分前、最低30秒
+    this._refreshTimer = setTimeout(() => {
+      this._refreshTimer = null;
+      this.silentSignIn().catch(() => {}); // 失敗しても無視（次のAPI呼び出し時に再試行）
+    }, delay);
   },
 
   // ------------------------------------------------------------
