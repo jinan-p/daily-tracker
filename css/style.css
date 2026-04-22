@@ -1940,3 +1940,111 @@ body {
   height: 30px;
   white-space: nowrap;
 }
+
+/* ============================================================
+   週カレンダーウィジェット（サイドバー）
+   ============================================================ */
+.week-cal-widget {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.week-cal-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sidebar-text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.week-cal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.week-cal-day-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.55);
+  margin-bottom: 2px;
+}
+
+.week-cal-event {
+  font-size: 10px;
+  color: var(--sidebar-text);
+  padding: 1px 0 1px 7px;
+  border-left: 2px solid var(--primary);
+  margin-bottom: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-cal-no-event {
+  font-size: 10px;
+  color: rgba(255,255,255,0.18);
+  padding: 1px 0 1px 7px;
+}
+
+/* ============================================================
+   採点履歴パネル（スケジュール画面下部）
+   ============================================================ */
+.score-history-panel {
+  flex-shrink: 0;
+  height: 170px;
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid var(--border);
+  background: var(--card-bg);
+}
+
+.score-history-header {
+  padding: 6px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-light);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.score-history-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.score-history-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 5px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.score-history-item:last-child { border-bottom: none; }
+
+.score-history-date {
+  width: 110px;
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.score-history-score {
+  width: 36px;
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--primary);
+  text-align: right;
+}

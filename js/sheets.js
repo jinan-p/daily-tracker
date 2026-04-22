@@ -297,6 +297,38 @@ const Sheets = {
   },
 
   // ============================================================
+  // 採点履歴（Timelineシートからスコアを集計）
+  // ============================================================
+
+  async getScoreHistory(days = 30) {
+    const rows = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
+
+    // 日付ごとにスコアを合計
+    const byDate = {};
+    for (const row of rows) {
+      const date = row[0];
+      const score = row[5] !== undefined && row[5] !== '' ? parseInt(row[5], 10) : null;
+      if (!date) continue;
+      if (!byDate[date]) byDate[date] = 0;
+      if (score !== null && !isNaN(score)) byDate[date] += score;
+    }
+
+    // 直近N日を新しい順で返す（データがある日のみ）
+    const result = [];
+    const today = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      if (byDate[dateStr] !== undefined) {
+        result.push({ date: dateStr, score: byDate[dateStr] });
+      }
+    }
+    return result;
+  },
+
+  // ============================================================
   // 履歴（直近N日）
   // ============================================================
 

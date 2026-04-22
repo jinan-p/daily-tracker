@@ -47,6 +47,70 @@ const Calendar = {
   },
 
   // ------------------------------------------------------------
+  // 今日から7日分のイベントを一括取得（日付ごとにグループ化）
+  // ------------------------------------------------------------
+  async getWeekEvents(startDateStr) {
+    if (!Auth.accessToken || Auth.isExpired()) {
+      throw new Error('トークンが期限切れです。🔄ボタンで再認証してください');
+    }
+    const token = Auth.accessToken;
+
+    // 7日後の日付を計算
+    const endD = new Date(startDateStr + 'T00:00:00');
+    endD.setDate(endD.getDate() + 6);
+    const pad = n => String(n).padStart(2, '0');
+    const endDateStr = `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}`;
+
+    const params = new URLSearchParams({
+      timeMin: `${startDateStr}T00:00:00+09:00`,
+      timeMax: `${endDateStr}T23:59:59+09:00`,
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '100',
+    });
+
+    const res = await fetch(
+      `${CONFIG.CALENDAR_BASE}/calendars/primary/events?${params}`,
+      { headers: { 'Authorization': `Bearer ${token}` } },
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || 'カレンダーの取得に失敗しました');
+    }
+
+    const data = await res.json();
+
+    // 7日分の空配列で初期化
+    const byDate = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startDateStr + 'T00:00:00');
+      d.setDate(d.getDate() + i);
+      byDate[`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`] = [];
+    }
+
+    for (const item of (data.items || [])) {
+      let eventDate;
+      if (item.start.dateTime) {
+        const d = new Date(item.start.dateTime);
+        eventDate = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      } else {
+        eventDate = item.start.date;
+      }
+      if (byDate[eventDate] !== undefined) {
+        byDate[eventDate].push({
+          id:     item.id,
+          title:  item.summary || '（タイトルなし）',
+          time:   this._formatTime(item.start),
+          allDay: !item.start.dateTime,
+        });
+      }
+    }
+
+    return byDate;
+  },
+
+  // ------------------------------------------------------------
   // 時刻フォーマット（"09:30" 形式）
   // ------------------------------------------------------------
   _formatTime(start) {

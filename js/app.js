@@ -146,6 +146,68 @@ function roundToSlot(timeStr) {
 }
 
 // ============================================================
+// 週カレンダーウィジェット
+// ============================================================
+async function loadWeekCalWidget() {
+  const widget = document.getElementById('weekCalWidget');
+  const list   = document.getElementById('weekCalList');
+  try {
+    const weekEvents = await Calendar.getWeekEvents(State.actualToday);
+    list.innerHTML = '';
+    for (let i = 0; i < 7; i++) {
+      const date   = addDays(State.actualToday, i);
+      const events = weekEvents[date] || [];
+      const dayEl  = document.createElement('div');
+      dayEl.className = 'week-cal-day';
+
+      const labelEl = document.createElement('div');
+      labelEl.className = 'week-cal-day-label';
+      labelEl.textContent = formatDateJP(date);
+      dayEl.appendChild(labelEl);
+
+      if (events.length > 0) {
+        events.forEach(ev => {
+          const evEl = document.createElement('div');
+          evEl.className = 'week-cal-event';
+          evEl.textContent = `${ev.allDay ? '終日' : ev.time} ${ev.title}`;
+          evEl.title = evEl.textContent;
+          dayEl.appendChild(evEl);
+        });
+      } else {
+        const noEl = document.createElement('div');
+        noEl.className = 'week-cal-no-event';
+        noEl.textContent = '予定なし';
+        dayEl.appendChild(noEl);
+      }
+      list.appendChild(dayEl);
+    }
+    widget.classList.remove('hidden');
+  } catch (e) {
+    console.warn('週カレンダー取得失敗:', e);
+  }
+}
+
+// ============================================================
+// 採点履歴レンダリング
+// ============================================================
+async function renderScoreHistory() {
+  const panel = document.getElementById('scoreHistoryPanel');
+  const list  = document.getElementById('scoreHistoryList');
+  try {
+    const history = await Sheets.getScoreHistory(30);
+    if (history.length === 0) return;
+    list.innerHTML = history.map(h => `
+      <div class="score-history-item">
+        <span class="score-history-date">${formatDateJP(h.date)}</span>
+        <span class="score-history-score">${h.score}点</span>
+      </div>`).join('');
+    panel.classList.remove('hidden');
+  } catch (e) {
+    console.warn('採点履歴取得失敗:', e);
+  }
+}
+
+// ============================================================
 // Google Identity Services のロード待ち
 // ============================================================
 function waitForGoogle(callback) {
@@ -386,6 +448,8 @@ async function loadAll() {
 
     renderAll();
     showToast('読み込み完了 ✅');
+    loadWeekCalWidget().catch(e => console.warn('週カレンダー:', e));
+    renderScoreHistory().catch(e => console.warn('採点履歴:', e));
   } catch (e) {
     renderAll();
     showToast('読み込みエラー: ' + e.message + ' — 同期ボタン🔄で再試行', 'error');
