@@ -160,16 +160,18 @@
           </div>
           <button class="btn-primary btn-save-eval" id="btnMemoEdit">編集</button>
         </div>
-        <div class="card">
-          <div id="memoDisplay" class="memo-display"></div>
-          <textarea id="memoTextarea" class="form-input memo-textarea hidden"
-            placeholder="ここにメモを書いてください。URLは自動でリンクになります。&#10;&#10;例：&#10;- やりたいこと&#10;- https://example.com"></textarea>
-        </div>
+        <div class="memo-split-layout">
+          <div class="card memo-split-left">
+            <div id="memoDisplay" class="memo-display"></div>
+            <textarea id="memoTextarea" class="form-input memo-textarea hidden"
+              placeholder="ここにメモを書いてください。URLは自動でリンクになります。&#10;&#10;例：&#10;- やりたいこと&#10;- https://example.com"></textarea>
+          </div>
 
-        <!-- 採点履歴 -->
-        <div id="scoreHistoryPanel" class="score-history-panel hidden">
-          <div class="score-history-header">📊 採点履歴（直近30日）</div>
-          <div id="scoreHistoryList" class="score-history-list"></div>
+          <!-- 採点履歴 -->
+          <div id="scoreHistoryPanel" class="score-history-panel hidden memo-split-right">
+            <div class="score-history-header">📊 採点履歴（直近30日）</div>
+            <div id="scoreHistoryList" class="score-history-list"></div>
+          </div>
         </div>
 
       </div>
