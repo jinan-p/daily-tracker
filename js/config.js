@@ -33,6 +33,7 @@ const CONFIG = {
     MEMO:         'dt_memo',
     PRESETS:      'dt_presets',
     MIGRATED_V2:  'dt_migrated_v2',
+    MIGRATED_V4:  'dt_migrated_v4',
   },
 };
 

@@ -14,26 +14,7 @@ const TIME_SLOTS = (() => {
   return slots; // 34スロット: 05:00, 05:30 ... 21:00, 21:30
 })();
 
-const CATEGORIES = [
-  { key: 'ジナンの価値を上げる',        icon: '🚀' },
-  { key: '健康・片付け',                icon: '💪' },
-  { key: 'チーム関係（YouTube・運営）',  icon: '🎥' },
-  { key: '投資・お金',                  icon: '💰' },
-  { key: 'やるべきリスト',              icon: '✅' },
-];
-
-const DEFAULT_PRESETS = {
-  'ジナンの価値を上げる': ['アウトプット', 'おすすめ整理（店・本・動画）', 'AIファイルの整理'],
-  '健康・片付け': ['運動', 'パートナー', '部屋の片付け'],
-  'チーム関係（YouTube・運営）': ['企画シート', 'ざわつかせた地図', 'ジナン業務'],
-  '投資・お金': ['確定申告', '個人簿記', '法人簿記', '銀行整理'],
-  'やるべきリスト': [
-    '船舶免許の住所変更', '山手皮膚科の予約', 'クレカ更新（エニタイム・Zoom）',
-    'ミニミニに確認（太陽光）', '太陽光発電の会社に連絡', 'Google / YouTube住所変更',
-    'プルデンシャル解約', '火災保険の継続→切替', 'デスク購入', 'iPhone購入',
-    '電子レンジ購入', 'ベッド購入', '人に会う（ヨンサン・イチパパ・ツボツボ）',
-  ],
-};
+// カテゴリは廃止。アイコンは全て 📌 で統一。
 
 // ============================================================
 // 状態
@@ -128,11 +109,8 @@ function savePresets(presets) {
   Store.set(CONFIG.LS.PRESETS, JSON.stringify(presets));
 }
 
-function getRoutineIcon(routineId) {
-  const r = State.routines.find(r => r.id === routineId);
-  if (!r) return '📌';
-  const cat = CATEGORIES.find(c => c.key === r.category);
-  return cat ? cat.icon : '📌';
+function getRoutineIcon() {
+  return '📌';
 }
 
 // カレンダーの時刻を 30 分単位スロットに丸める
@@ -357,26 +335,27 @@ async function launchApp() {
 // デフォルトルーティン初期化（初回のみ）
 // ============================================================
 async function initDefaultRoutines() {
-  const defaults = [
-    { name: 'ジナンの価値を上げる',       category: 'ジナンの価値を上げる',
-      items: ['アウトプット', 'おすすめ整理（店・本・動画）', 'AIファイルの整理'] },
-    { name: '健康・片付け',               category: '健康・片付け',
-      items: ['運動', 'パートナー', '部屋の片付け'] },
-    { name: 'チーム関係（YouTube・運営）', category: 'チーム関係（YouTube・運営）',
-      items: ['企画シート', 'ざわつかせた地図', 'ジナン業務'] },
-    { name: '投資・お金',                 category: '投資・お金',
-      items: ['確定申告', '個人簿記', '法人簿記', '銀行整理'] },
-    { name: 'やるべきリスト',             category: 'やるべきリスト',
-      items: ['船舶免許の住所変更', '山手皮膚科の予約', 'クレカ更新（エニタイム・Zoom）',
-              'ミニミニに確認（太陽光）', '太陽光発電の会社に連絡', 'Google / YouTube住所変更',
-              'プルデンシャル解約', '火災保険の継続→切替', 'デスク購入', 'iPhone購入',
-              '電子レンジ購入', 'ベッド購入', '人に会う（ヨンサン・イチパパ・ツボツボ）'] },
+  // 「1 やることリスト」だけプリセット（プルダウン）付き。他はシンプルカード。
+  const names = [
+    '1 やることリスト',
+    '2 企画シート',
+    '3 体重',
+    '4 株式',
+    '5 アウトプット',
+    '6 確定申告',
+    '7 簿記',
+    '8 部屋の片付け',
+    '9 ざわつかせた地図',
+    '10 パートナー',
+    '11 AI整理',
+    '12 メモ',
   ];
   const p = loadPresets();
-  defaults.forEach((d, i) => {
+  names.forEach((name, i) => {
     const id = genId();
-    State.routines.push({ id, name: d.name, category: d.category, duration: '', active: true, order: i, onetime: false });
-    p[id] = d.items;
+    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false });
+    // 「1 やることリスト」のみプリセット配列を初期化（空リスト → 編集で追加）
+    if (i === 0) p[id] = [];
   });
   savePresets(p);
   await Sheets.saveAllRoutines(State.routines);
@@ -419,6 +398,21 @@ async function loadAll() {
         Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
       ]).catch(() => {});
       Store.set('dt_migrated_v3', '1');
+    }
+
+    // v4マイグレーション: 12番号付きルーティンへ置き換え
+    if (!Store.get(CONFIG.LS.MIGRATED_V4)) {
+      State.routines = State.routines.filter(r => r.onetime);
+      savePresets({});  // 古いプリセットをクリア
+      await initDefaultRoutines();
+      // ルーティン系タイムライン項目を削除（IDが変わるため）
+      State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine');
+      State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine');
+      await Promise.all([
+        Sheets.saveTimeline(State.today,    State.todayTimeline),
+        Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
+      ]).catch(() => {});
+      Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）
@@ -560,7 +554,7 @@ function renderRoutinesPanel() {
     return;
   }
 
-  // ルーティンタブ: 5つの固定カード（プルダウン付き）
+  // ルーティンタブ
   const routines = State.routines.filter(r => r.active && !r.onetime);
   if (routines.length === 0) {
     container.innerHTML = '<div class="empty-state">ルーティン設定からルーティンを追加してください</div>';
@@ -569,32 +563,56 @@ function renderRoutinesPanel() {
 
   const presets = loadPresets();
   container.innerHTML = routines.map(r => {
-    const icon    = CATEGORIES.find(c => c.key === r.category)?.icon || '📌';
-    const items   = presets[r.id] || [];
-    const currentIdx = State.routineSelections[r.id] ?? 0;
-    const options = items.length > 0
-      ? items.map((item, idx) => `<option value="${item.replace(/"/g, '&quot;')}" ${idx === currentIdx ? 'selected' : ''}>${item}</option>`).join('')
-      : '<option value="">（項目なし）</option>';
-    return `
-      <div class="routine-card routine-card-v2" draggable="true"
-           data-type="routine" data-id="${r.id}"
-           data-slot="unplaced" data-date="unplaced">
-        <div class="routine-card-top">
-          <span class="routine-card-icon">${icon}</span>
+    const items = presets[r.id];  // undefined = プリセットなし
+    const hasPresets = Array.isArray(items);
+
+    if (hasPresets) {
+      // プルダウン付きカード（「1 やることリスト」など）
+      const currentIdx = State.routineSelections[r.id] ?? 0;
+      const options = items.length > 0
+        ? items.map((item, idx) => `<option value="${item.replace(/"/g, '&quot;')}" ${idx === currentIdx ? 'selected' : ''}>${item}</option>`).join('')
+        : '<option value="">（項目なし）</option>';
+      return `
+        <div class="routine-card routine-card-v2" draggable="true"
+             data-type="routine" data-id="${r.id}"
+             data-slot="unplaced" data-date="unplaced">
+          <div class="routine-card-top">
+            <span class="routine-card-icon">📌</span>
+            <span class="routine-card-name">${r.name}</span>
+          </div>
+          <select class="routine-card-select">${options}</select>
+        </div>`;
+    } else {
+      // シンプルカード（プルダウンなし）
+      const safeTitle = r.name.replace(/"/g, '&quot;');
+      return `
+        <div class="routine-card" draggable="true"
+             data-type="routine" data-id="${r.id}"
+             data-slot="unplaced" data-date="unplaced"
+             data-title="${safeTitle}">
+          <span class="routine-card-icon">📌</span>
           <span class="routine-card-name">${r.name}</span>
-        </div>
-        <select class="routine-card-select">${options}</select>
-      </div>`;
+        </div>`;
+    }
   }).join('');
 
+  // プルダウン付きカードのイベント
   container.querySelectorAll('.routine-card-v2').forEach(el => {
     el.addEventListener('dragstart', onRoutineV2DragStart);
     el.addEventListener('dragend',   onItemDragEnd);
     el.addEventListener('dragover',  onPanelCardDragOver);
     el.addEventListener('dragleave', onPanelCardDragLeave);
     el.addEventListener('drop',      onPanelCardDrop);
-    // selectをクリックしてもドラッグが始まらないように
     el.querySelector('.routine-card-select').addEventListener('mousedown', e => e.stopPropagation());
+  });
+
+  // シンプルカードのイベント（.routine-card-v2 以外）
+  container.querySelectorAll('.routine-card:not(.routine-card-v2)').forEach(el => {
+    el.addEventListener('dragstart', onItemDragStart);
+    el.addEventListener('dragend',   onItemDragEnd);
+    el.addEventListener('dragover',  onPanelCardDragOver);
+    el.addEventListener('dragleave', onPanelCardDragLeave);
+    el.addEventListener('drop',      onPanelCardDrop);
   });
 }
 
@@ -1017,7 +1035,6 @@ function renderRoutineSettings() {
 
   const presets = loadPresets();
   container.innerHTML = routines.map(r => {
-    const icon  = CATEGORIES.find(c => c.key === r.category)?.icon || '📌';
     const items = presets[r.id] || [];
     const tagsHtml = items.map((item, idx) => `
       <span class="preset-tag" draggable="true" data-routine-id="${r.id}" data-idx="${idx}">
@@ -1028,7 +1045,7 @@ function renderRoutineSettings() {
     return `
       <div class="routine-setting-item ${r.active ? '' : 'inactive'}" data-id="${r.id}">
         <div class="routine-setting-header">
-          <span class="routine-setting-icon">${icon}</span>
+          <span class="routine-setting-icon">📌</span>
           <span class="routine-setting-name">${r.name}</span>
           <div class="routine-setting-actions">
             <label class="toggle-switch">
@@ -1150,9 +1167,7 @@ function openAddRoutine(isOnetime = false) {
   State.editRoutineId = null;
   document.getElementById('routineModalTitle').textContent = isOnetime ? '単発タスクを追加' : 'ルーティンを追加';
   document.getElementById('routineOnetimeFlag').value = isOnetime ? '1' : '0';
-  document.getElementById('routineName').value     = '';
-  document.getElementById('routineCategory').value = CATEGORIES[0].key;
-  document.getElementById('routineCategoryGroup').style.display = isOnetime ? 'none' : '';
+  document.getElementById('routineName').value = '';
   openModal('routineModal');
   setTimeout(() => document.getElementById('routineName').focus(), 50);
 }
@@ -1162,10 +1177,8 @@ function openEditRoutine(routineId) {
   if (!r) return;
   State.editRoutineId = routineId;
   document.getElementById('routineModalTitle').textContent = 'ルーティンを編集';
-  document.getElementById('routineOnetimeFlag').value      = r.onetime ? '1' : '0';
-  document.getElementById('routineName').value             = r.name;
-  document.getElementById('routineCategory').value         = r.category || CATEGORIES[0].key;
-  document.getElementById('routineCategoryGroup').style.display = r.onetime ? 'none' : '';
+  document.getElementById('routineOnetimeFlag').value = r.onetime ? '1' : '0';
+  document.getElementById('routineName').value        = r.name;
   openModal('routineModal');
   setTimeout(() => document.getElementById('routineName').focus(), 50);
 }
@@ -1173,7 +1186,7 @@ function openEditRoutine(routineId) {
 async function saveRoutine() {
   const name      = document.getElementById('routineName').value.trim();
   const isOnetime = document.getElementById('routineOnetimeFlag').value === '1';
-  const category  = isOnetime ? 'その他' : document.getElementById('routineCategory').value;
+  const category  = 'default';
   if (!name) { showToast('名前を入力してください', 'error'); return; }
 
   if (State.editRoutineId) {
