@@ -176,16 +176,21 @@ async function loadWeekCalWidget() {
 async function renderScoreHistory() {
   const panel = document.getElementById('scoreHistoryPanel');
   const list  = document.getElementById('scoreHistoryList');
+  panel.classList.remove('hidden');
+  list.innerHTML = '<div class="empty-state">読み込み中…</div>';
   try {
     const history = await Sheets.getScoreHistory(30);
-    if (history.length === 0) return;
+    if (history.length === 0) {
+      list.innerHTML = '<div class="empty-state">採点データがまだありません</div>';
+      return;
+    }
     list.innerHTML = history.map(h => `
       <div class="score-history-item">
         <span class="score-history-date">${formatDateJP(h.date)}</span>
         <span class="score-history-score">${h.score}点</span>
       </div>`).join('');
-    panel.classList.remove('hidden');
   } catch (e) {
+    list.innerHTML = '<div class="empty-state">取得失敗</div>';
     console.warn('採点履歴取得失敗:', e);
   }
 }
