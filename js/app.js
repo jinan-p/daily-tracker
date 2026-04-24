@@ -14,7 +14,12 @@ const TIME_SLOTS = (() => {
   return slots; // 34スロット: 05:00, 05:30 ... 21:00, 21:30
 })();
 
-// カテゴリは廃止。アイコンは全て 📌 で統一。
+const YARUKOTO_PRESETS = [
+  '船舶免許の住所変更', '山手皮膚科の予約', 'クレカ更新（エニタイム・Zoom）',
+  'ミニミニに確認（太陽光）', '太陽光発電の会社に連絡', 'Google / YouTube住所変更',
+  'プルデンシャル解約', '火災保険の継続→切替', 'デスク購入', 'iPhone購入',
+  '電子レンジ購入', 'ベッド購入', '人に会う（ヨンサン・イチパパ・ツボツボ）',
+];
 
 // ============================================================
 // 状態
@@ -110,7 +115,7 @@ function savePresets(presets) {
 }
 
 function getRoutineIcon() {
-  return '📌';
+  return '';
 }
 
 // カレンダーの時刻を 30 分単位スロットに丸める
@@ -354,8 +359,8 @@ async function initDefaultRoutines() {
   names.forEach((name, i) => {
     const id = genId();
     State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false });
-    // 「1 やることリスト」のみプリセット配列を初期化（空リスト → 編集で追加）
-    if (i === 0) p[id] = [];
+    // 「1 やることリスト」のみプリセットを初期設定
+    if (i === 0) p[id] = [...YARUKOTO_PRESETS];
   });
   savePresets(p);
   await Sheets.saveAllRoutines(State.routines);
@@ -413,6 +418,17 @@ async function loadAll() {
         Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
       ]).catch(() => {});
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
+    }
+
+    // v5マイグレーション: 「1 やることリスト」のプリセットを追加
+    if (!Store.get(CONFIG.LS.MIGRATED_V5)) {
+      const r1 = State.routines.find(r => r.name === '1 やることリスト');
+      if (r1) {
+        const p = loadPresets();
+        p[r1.id] = [...YARUKOTO_PRESETS];
+        savePresets(p);
+      }
+      Store.set(CONFIG.LS.MIGRATED_V5, '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）
@@ -577,7 +593,6 @@ function renderRoutinesPanel() {
              data-type="routine" data-id="${r.id}"
              data-slot="unplaced" data-date="unplaced">
           <div class="routine-card-top">
-            <span class="routine-card-icon">📌</span>
             <span class="routine-card-name">${r.name}</span>
           </div>
           <select class="routine-card-select">${options}</select>
@@ -590,7 +605,6 @@ function renderRoutinesPanel() {
              data-type="routine" data-id="${r.id}"
              data-slot="unplaced" data-date="unplaced"
              data-title="${safeTitle}">
-          <span class="routine-card-icon">📌</span>
           <span class="routine-card-name">${r.name}</span>
         </div>`;
     }
@@ -1045,7 +1059,6 @@ function renderRoutineSettings() {
     return `
       <div class="routine-setting-item ${r.active ? '' : 'inactive'}" data-id="${r.id}">
         <div class="routine-setting-header">
-          <span class="routine-setting-icon">📌</span>
           <span class="routine-setting-name">${r.name}</span>
           <div class="routine-setting-actions">
             <label class="toggle-switch">
