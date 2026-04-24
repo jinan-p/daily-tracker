@@ -1996,20 +1996,22 @@ body {
 }
 
 /* ============================================================
-   メモ画面 上下分割レイアウト
+   メモ画面 左右分割レイアウト
    ============================================================ */
 .memo-split-layout {
   display: flex;
-  flex-direction: column;
   gap: 20px;
+  align-items: flex-start;
 }
 
 .memo-split-left {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 .memo-split-right {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ============================================================
