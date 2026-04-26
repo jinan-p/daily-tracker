@@ -953,6 +953,18 @@ body {
 }
 
 .routine-setting-item:hover { border-color: var(--primary); }
+.routine-setting-item[draggable] { cursor: grab; }
+.routine-setting-item[draggable]:active { cursor: grabbing; }
+.routine-setting-item.setting-dragging { opacity: 0.35; }
+.routine-setting-item.setting-drag-over { border-color: var(--primary); background: var(--bg); }
+
+.routine-drag-handle {
+  color: var(--text-light);
+  font-size: 16px;
+  padding-right: 8px;
+  cursor: grab;
+  flex-shrink: 0;
+}
 
 .routine-setting-item.inactive {
   opacity: 0.5;

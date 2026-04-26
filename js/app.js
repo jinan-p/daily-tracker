@@ -24,7 +24,8 @@ const YARUKOTO_PRESETS = [
 // ============================================================
 // 状態
 // ============================================================
-let _presetDrag = null; // プリセット項目ドラッグ状態 { routineId, fromIdx }
+let _presetDrag   = null; // プリセット項目ドラッグ状態 { routineId, fromIdx }
+let _settingDrag  = null; // ルーティン設定並び替えドラッグ状態 { fromId }
 
 const State = {
   routines:          [],
@@ -415,9 +416,10 @@ async function loadAll() {
       State.routines = State.routines.filter(r => r.onetime);
       savePresets({});  // 古いプリセットをクリア
       await initDefaultRoutines();
-      // ルーティン系タイムライン項目を削除（IDが変わるため）
-      State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine');
-      State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine');
+      // ルーティン系タイムライン項目を削除（IDが変わるため）※スコアあり項目は保持
+      const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
+      State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
+      State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
       await Promise.all([
         Sheets.saveTimeline(State.today,    State.todayTimeline),
         Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
@@ -436,11 +438,13 @@ async function loadAll() {
       Store.set(CONFIG.LS.MIGRATED_V5, '1');
     }
 
-    // 存在しないルーティンIDのタイムライン項目を削除（安全策）
+    // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持
     const validIds = new Set(State.routines.map(r => r.id));
-    const cleanTimeline = tl => tl.filter(i => i.itemType !== 'routine' || validIds.has(i.itemId));
-    const todayCleaned    = State.todayTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId));
-    const tomorrowCleaned = State.tomorrowTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId));
+    const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
+    const cleanTimeline = tl => tl.filter(i =>
+      i.itemType !== 'routine' || validIds.has(i.itemId) || hasScore(i));
+    const todayCleaned    = State.todayTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId) && !hasScore(i));
+    const tomorrowCleaned = State.tomorrowTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId) && !hasScore(i));
     State.todayTimeline    = cleanTimeline(State.todayTimeline);
     State.tomorrowTimeline = cleanTimeline(State.tomorrowTimeline);
     if (todayCleaned)    await Sheets.saveTimeline(State.today,    State.todayTimeline).catch(() => {});
@@ -1042,6 +1046,48 @@ function addManualTask() {
 }
 
 // ============================================================
+// ルーティン並び替え・自動採番
+// ============================================================
+function renumberRoutines(routines) {
+  // 非onetimeルーティンの順序に従い "N 名前" 形式で採番
+  let num = 1;
+  routines.forEach(r => {
+    if (r.onetime) return;
+    const baseName = r.name.replace(/^\d+\s+/, ''); // 先頭の "数字 " を除去
+    r.name = `${num} ${baseName}`;
+    num++;
+  });
+}
+
+async function reorderRoutineSettings(fromId, toId) {
+  if (fromId === toId) return;
+  const nonOnetime = State.routines.filter(r => !r.onetime);
+  const fromIdx = nonOnetime.findIndex(r => r.id === fromId);
+  const toIdx   = nonOnetime.findIndex(r => r.id === toId);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  // 並び替え
+  const [moved] = nonOnetime.splice(fromIdx, 1);
+  nonOnetime.splice(toIdx, 0, moved);
+
+  // 採番しなおして State に反映
+  renumberRoutines(nonOnetime);
+  nonOnetime.forEach((r, i) => { r.order = i; });
+
+  // onetimeはそのまま末尾に
+  State.routines = [...nonOnetime, ...State.routines.filter(r => r.onetime)];
+
+  renderRoutineSettings();
+  renderRoutinesPanel();
+  try {
+    await Sheets.saveAllRoutines(State.routines);
+    showToast('並び順を保存しました');
+  } catch (e) {
+    showToast('並び順の保存に失敗しました', 'error');
+  }
+}
+
+// ============================================================
 // ルーティン設定ビュー（プリセット管理込み）
 // ============================================================
 function renderRoutineSettings() {
@@ -1062,8 +1108,9 @@ function renderRoutineSettings() {
         <button class="preset-tag-del" data-id="${r.id}" data-idx="${idx}">✕</button>
       </span>`).join('');
     return `
-      <div class="routine-setting-item ${r.active ? '' : 'inactive'}" data-id="${r.id}">
+      <div class="routine-setting-item ${r.active ? '' : 'inactive'}" draggable="true" data-id="${r.id}">
         <div class="routine-setting-header">
+          <span class="routine-drag-handle" title="ドラッグで並び替え">⠿</span>
           <span class="routine-setting-name">${r.name}</span>
           <div class="routine-setting-actions">
             <label class="toggle-switch">
@@ -1084,6 +1131,40 @@ function renderRoutineSettings() {
         </div>
       </div>`;
   }).join('');
+
+  // ルーティン並び替えドラッグ&ドロップ
+  container.querySelectorAll('.routine-setting-item').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      _settingDrag = { fromId: el.dataset.id };
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => el.classList.add('setting-dragging'), 0);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('setting-dragging');
+      container.querySelectorAll('.routine-setting-item').forEach(x => x.classList.remove('setting-drag-over'));
+      _settingDrag = null;
+    });
+    el.addEventListener('dragover', e => {
+      if (!_settingDrag || _settingDrag.fromId === el.dataset.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      container.querySelectorAll('.routine-setting-item').forEach(x => x.classList.remove('setting-drag-over'));
+      el.classList.add('setting-drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('setting-drag-over'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove('setting-drag-over');
+      if (!_settingDrag) return;
+      reorderRoutineSettings(_settingDrag.fromId, el.dataset.id);
+      _settingDrag = null;
+    });
+    // ボタン類がドラッグを誤発火させないように
+    el.querySelectorAll('button, input, label, select').forEach(b =>
+      b.addEventListener('mousedown', ev => ev.stopPropagation())
+    );
+  });
 
   container.querySelectorAll('.routine-toggle').forEach(el => {
     el.addEventListener('change', () => toggleRoutineActive(el.dataset.id, el.checked));
