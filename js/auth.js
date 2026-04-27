@@ -122,17 +122,23 @@ const Auth = {
 
   // ------------------------------------------------------------
   // アクセストークンを取得（期限切れなら再認証、並列呼び出し対応）
+  // 15秒タイムアウト付き（Safari等でポップアップが無音でブロックされた場合に備える）
   // ------------------------------------------------------------
   getToken() {
     if (this.accessToken && !this.isExpired()) {
       return Promise.resolve(this.accessToken);
     }
-    // 既に取得中なら同じPromiseを返す（並列リクエストの競合を防ぐ）
     if (!this._pendingToken) {
       this._pendingToken = new Promise((resolve, reject) => {
+        // 15秒以内に認証が完了しなければタイムアウトエラー
+        const timer = setTimeout(() => {
+          this._pendingToken = null;
+          reject(new Error('TIMEOUT'));
+        }, 15000);
+
         this.signIn(
-          (res) => { this._pendingToken = null; resolve(res.access_token); },
-          (err) => { this._pendingToken = null; reject(err); },
+          (res) => { clearTimeout(timer); this._pendingToken = null; resolve(res.access_token); },
+          (err) => { clearTimeout(timer); this._pendingToken = null; reject(new Error(err)); },
         );
       });
     }

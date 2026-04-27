@@ -376,12 +376,23 @@ async function initDefaultRoutines() {
 // データ読み込み
 // ============================================================
 async function loadAll() {
+  const syncBtn = document.getElementById('btnSync');
+  const origLabel = syncBtn?.textContent;
+  if (syncBtn) { syncBtn.textContent = '⏳'; syncBtn.disabled = true; }
+
+  const done = () => { if (syncBtn) { syncBtn.textContent = origLabel; syncBtn.disabled = false; } };
+
   // トークンが期限切れの場合は再認証してから進む（🔄ボタン経由なのでポップアップOK）
   if (Auth.isExpired()) {
     try {
       await Auth.getToken();
     } catch (e) {
-      showToast('認証に失敗しました。もう一度🔄を押してください', 'error');
+      done();
+      if (e.message === 'TIMEOUT') {
+        showToast('Googleサインインがタイムアウトしました。ポップアップがブロックされている可能性があります。SafariのアドレスバーのポップアップアイコンかSafari設定→Webサイト→ポップアップを確認してください', 'error');
+      } else {
+        showToast('認証に失敗しました: ' + e.message, 'error');
+      }
       return;
     }
   }
@@ -466,10 +477,12 @@ async function loadAll() {
     }
 
     renderAll();
+    done();
     showToast('読み込み完了 ✅');
     loadWeekCalWidget().catch(e => console.warn('週カレンダー:', e));
     renderScoreHistory().catch(e => console.warn('採点履歴:', e));
   } catch (e) {
+    done();
     renderAll();
     showToast('読み込みエラー: ' + e.message + ' — 同期ボタン🔄で再試行', 'error');
   }
