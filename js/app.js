@@ -108,7 +108,7 @@ function loadPresets() {
   if (stored) {
     try { return JSON.parse(stored); } catch {}
   }
-  return JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+  return {};
 }
 
 function savePresets(presets) {
@@ -486,8 +486,8 @@ async function loadAll() {
     renderScoreHistory().catch(e => console.warn('採点履歴:', e));
   } catch (e) {
     done();
-    renderAll();
-    showToast('読み込みエラー: ' + e.message + ' — 同期ボタン🔄で再試行', 'error');
+    try { renderAll(); } catch (re) { console.error('renderAll error in loadAll catch:', re); }
+    showToast('読み込みエラー: ' + (e.message || e) + ' — 同期ボタン🔄で再試行', 'error');
   }
 }
 
