@@ -45,6 +45,7 @@ const Auth = {
 
   // ------------------------------------------------------------
   // サインイン（ポップアップ表示）
+  // prompt: 'select_account' でSafari ITP対策（サイレント取得が失敗するブラウザ対応）
   // ------------------------------------------------------------
   signIn(onSuccess, onError) {
     this._onSuccess = onSuccess || (() => {});
@@ -61,7 +62,8 @@ const Auth = {
       return;
     }
 
-    this.tokenClient.requestAccessToken({ prompt: '', login_hint: Store.get(CONFIG.LS.USER_EMAIL) || '' });
+    // Safari等でサイレント取得が失敗する場合に備え、明示的にアカウント選択画面を表示
+    this.tokenClient.requestAccessToken({ prompt: 'select_account', login_hint: Store.get(CONFIG.LS.USER_EMAIL) || '' });
   },
 
   // ------------------------------------------------------------
