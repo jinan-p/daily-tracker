@@ -37,7 +37,7 @@ const Sheets = {
     const existing = meta.sheets.map(s => s.properties.title);
 
     const headers = {
-      [CONFIG.SHEET.ROUTINES]: [['id', 'name', 'category', 'duration', 'active', 'order']],
+      [CONFIG.SHEET.ROUTINES]: [['id', 'name', 'category', 'duration', 'active', 'order', 'onetime', 'presets']],
       [CONFIG.SHEET.TIMELINE]: [['date', 'itemType', 'itemId', 'timeSlot', 'title']],
     };
 
@@ -141,7 +141,7 @@ const Sheets = {
   // ============================================================
 
   async getRoutines() {
-    const rows = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:G1000`);
+    const rows = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:H1000`);
     return rows.map(r => ({
       id:       r[0] || '',
       name:     r[1] || '',
@@ -150,6 +150,7 @@ const Sheets = {
       active:   r[4] !== 'FALSE',
       order:    parseInt(r[5] || '0', 10),
       onetime:  r[6] === 'TRUE',
+      presets:  (() => { try { return JSON.parse(r[7] || '[]'); } catch { return []; } })(),
     })).sort((a, b) => a.order - b.order);
   },
 
@@ -157,9 +158,10 @@ const Sheets = {
     // 全行を上書き（順序保証）
     const values = routines.map((r, i) => [
       r.id, r.name, r.category, r.duration, r.active ? 'TRUE' : 'FALSE', i, r.onetime ? 'TRUE' : 'FALSE',
+      JSON.stringify(Array.isArray(r.presets) ? r.presets : []),
     ]);
     // まず既存をクリア（ヘッダー行除く）
-    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.ROUTINES + '!A2:G1000')}:clear`;
+    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.ROUTINES + '!A2:H1000')}:clear`;
     await this._req(clearUrl, { method: 'POST', body: '{}' });
     if (values.length > 0) {
       await this._write(`${CONFIG.SHEET.ROUTINES}!A2`, values);

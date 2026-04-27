@@ -103,17 +103,10 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function loadPresets() {
-  const stored = Store.get(CONFIG.LS.PRESETS);
-  if (stored) {
-    try { return JSON.parse(stored); } catch {}
-  }
-  return {};
-}
-
-function savePresets(presets) {
-  Store.set(CONFIG.LS.PRESETS, JSON.stringify(presets));
-}
+// プリセットはルーティンオブジェクト（r.presets）に直接保存するため
+// loadPresets/savePresets はレガシー互換のため残すが内部では使わない
+function loadPresets() { return {}; }
+function savePresets(_) {}
 
 function getRoutineIcon() {
   return '';
@@ -372,14 +365,11 @@ async function initDefaultRoutines() {
     '11 AI整理',
     '12 メモ',
   ];
-  const p = loadPresets();
   names.forEach((name, i) => {
     const id = genId();
-    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false });
-    // 「1 やることリスト」のみプリセットを初期設定
-    if (i === 0) p[id] = [...YARUKOTO_PRESETS];
+    const presets = i === 0 ? [...YARUKOTO_PRESETS] : [];
+    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false, presets });
   });
-  savePresets(p);
   await Sheets.saveAllRoutines(State.routines);
 }
 
@@ -428,7 +418,6 @@ async function loadAll() {
     // v4マイグレーション: 12番号付きルーティンへ置き換え
     if (!Store.get(CONFIG.LS.MIGRATED_V4)) {
       State.routines = State.routines.filter(r => r.onetime);
-      savePresets({});  // 古いプリセットをクリア
       await initDefaultRoutines();
       // ルーティン系タイムライン項目を削除（IDが変わるため）※スコアあり項目は保持
       const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
@@ -441,26 +430,12 @@ async function loadAll() {
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
 
-    // v5マイグレーション: 「1 やることリスト」のプリセットを追加
-    if (!Store.get(CONFIG.LS.MIGRATED_V5)) {
-      const r1 = State.routines.find(r => r.name === '1 やることリスト');
-      if (r1) {
-        const p = loadPresets();
-        p[r1.id] = [...YARUKOTO_PRESETS];
-        savePresets(p);
-      }
-      Store.set(CONFIG.LS.MIGRATED_V5, '1');
-    }
-
-    // 「1 やることリスト」のプリセットが空なら毎回補填（IDズレ対策）
+    // 「1 やることリスト」のプリセットが空ならデフォルトを補填してSheetsに保存
     {
       const r1 = State.routines.find(r => r.name === '1 やることリスト');
-      if (r1) {
-        const p = loadPresets();
-        if (!Array.isArray(p[r1.id]) || p[r1.id].length === 0) {
-          p[r1.id] = [...YARUKOTO_PRESETS];
-          savePresets(p);
-        }
+      if (r1 && (!Array.isArray(r1.presets) || r1.presets.length === 0)) {
+        r1.presets = [...YARUKOTO_PRESETS];
+        Sheets.saveAllRoutines(State.routines).catch(() => {});
       }
     }
 
@@ -614,10 +589,9 @@ function renderRoutinesPanel() {
     return;
   }
 
-  const presets = loadPresets();
   container.innerHTML = routines.map(r => {
-    const items = presets[r.id];  // undefined = プリセットなし
-    const hasPresets = Array.isArray(items);
+    const items = Array.isArray(r.presets) ? r.presets : [];
+    const hasPresets = items.length > 0;
 
     if (hasPresets) {
       // プルダウン付きカード（「1 やることリスト」など）
@@ -895,8 +869,8 @@ function onSlotDrop(e) {
 
   // ルーティンパネルからのドロップなら選択を次の項目へ進める
   if (fromDate === 'unplaced' && itemType === 'routine') {
-    const presets = loadPresets();
-    const items = presets[itemId] || [];
+    const r = State.routines.find(rt => rt.id === itemId);
+    const items = Array.isArray(r?.presets) ? r.presets : [];
     if (items.length > 0) {
       const currentIdx = State.routineSelections[itemId] ?? 0;
       State.routineSelections[itemId] = (currentIdx + 1) % items.length;
@@ -1126,9 +1100,8 @@ function renderRoutineSettings() {
     return;
   }
 
-  const presets = loadPresets();
   container.innerHTML = routines.map(r => {
-    const items = presets[r.id] || [];
+    const items = Array.isArray(r.presets) ? r.presets : [];
     const tagsHtml = items.map((item, idx) => `
       <span class="preset-tag" draggable="true" data-routine-id="${r.id}" data-idx="${idx}">
         <span class="preset-tag-handle">⠿</span>
@@ -1245,15 +1218,14 @@ function renderRoutineSettings() {
       if (!_presetDrag) return;
       const toIdx = parseInt(tag.dataset.idx, 10);
       if (_presetDrag.fromIdx === toIdx) { _presetDrag = null; return; }
-      const p = loadPresets();
-      const items = p[_presetDrag.routineId];
-      if (!items) { _presetDrag = null; return; }
-      const [moved] = items.splice(_presetDrag.fromIdx, 1);
-      items.splice(toIdx, 0, moved);
-      savePresets(p);
+      const r = State.routines.find(rt => rt.id === _presetDrag.routineId);
+      if (!r || !Array.isArray(r.presets)) { _presetDrag = null; return; }
+      const [moved] = r.presets.splice(_presetDrag.fromIdx, 1);
+      r.presets.splice(toIdx, 0, moved);
       _presetDrag = null;
       renderRoutineSettings();
       renderRoutinesPanel();
+      Sheets.saveAllRoutines(State.routines).catch(() => {});
     });
     // ✕ボタンがドラッグを誤発火させないように
     tag.querySelector('.preset-tag-del').addEventListener('mousedown', e => e.stopPropagation());
@@ -1261,23 +1233,24 @@ function renderRoutineSettings() {
 }
 
 function deletePresetItem(routineId, idx) {
-  const p = loadPresets();
-  if (!p[routineId]) return;
-  p[routineId].splice(idx, 1);
-  savePresets(p);
+  const r = State.routines.find(rt => rt.id === routineId);
+  if (!r || !Array.isArray(r.presets)) return;
+  r.presets.splice(idx, 1);
   renderRoutineSettings();
   renderRoutinesPanel();
+  Sheets.saveAllRoutines(State.routines).catch(() => showToast('保存に失敗しました', 'error'));
 }
 
 function addPresetItemById(routineId, value, inputEl) {
   if (!value) return;
-  const p = loadPresets();
-  if (!p[routineId]) p[routineId] = [];
-  p[routineId].push(value);
-  savePresets(p);
+  const r = State.routines.find(rt => rt.id === routineId);
+  if (!r) return;
+  if (!Array.isArray(r.presets)) r.presets = [];
+  r.presets.push(value);
   if (inputEl) inputEl.value = '';
   renderRoutineSettings();
   renderRoutinesPanel();
+  Sheets.saveAllRoutines(State.routines).catch(() => showToast('保存に失敗しました', 'error'));
   showToast('項目を追加しました ✅');
 }
 
@@ -1320,7 +1293,7 @@ async function saveRoutine() {
     const r = State.routines.find(r => r.id === State.editRoutineId);
     if (r) { r.name = name; r.category = category; }
   } else {
-    State.routines.push({ id: genId(), name, category, duration: '', active: true, order: State.routines.length, onetime: isOnetime });
+    State.routines.push({ id: genId(), name, category, duration: '', active: true, order: State.routines.length, onetime: isOnetime, presets: [] });
   }
 
   closeModal('routineModal');
