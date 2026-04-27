@@ -430,13 +430,14 @@ async function loadAll() {
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
 
-    // 「1 やることリスト」のプリセットが空ならデフォルトを補填してSheetsに保存
-    {
+    // 「1 やることリスト」のプリセット初期補填（初回のみ・以降はユーザーの変更を保持）
+    if (!Store.get(CONFIG.LS.MIGRATED_V7)) {
       const r1 = State.routines.find(r => r.name === '1 やることリスト');
       if (r1 && (!Array.isArray(r1.presets) || r1.presets.length === 0)) {
         r1.presets = [...YARUKOTO_PRESETS];
         Sheets.saveAllRoutines(State.routines).catch(() => {});
       }
+      Store.set(CONFIG.LS.MIGRATED_V7, '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持
