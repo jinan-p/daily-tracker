@@ -452,6 +452,19 @@ async function loadAll() {
       Store.set(CONFIG.LS.MIGRATED_V5, '1');
     }
 
+    // v6マイグレーション: IDズレでプリセットが空になっていたら再リンク
+    if (!Store.get(CONFIG.LS.MIGRATED_V6)) {
+      const r1 = State.routines.find(r => r.name === '1 やることリスト');
+      if (r1) {
+        const p = loadPresets();
+        if (!Array.isArray(p[r1.id]) || p[r1.id].length === 0) {
+          p[r1.id] = [...YARUKOTO_PRESETS];
+          savePresets(p);
+        }
+      }
+      Store.set(CONFIG.LS.MIGRATED_V6, '1');
+    }
+
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持
     const validIds = new Set(State.routines.map(r => r.id));
     const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
