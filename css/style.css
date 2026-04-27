@@ -1252,6 +1252,45 @@ body {
 .toast.error { border-left: 4px solid var(--danger); }
 
 /* ============================================================
+   再認証バナー
+   ============================================================ */
+.auth-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  background: linear-gradient(90deg, #6C63FF, #5A52D5);
+  padding: 14px 24px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+}
+
+.auth-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 900px;
+  margin: 0 auto;
+  flex-wrap: wrap;
+}
+
+.auth-banner-icon { font-size: 20px; }
+
+.auth-banner-msg {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  flex: 1;
+  min-width: 200px;
+}
+
+.auth-banner-btn {
+  flex-shrink: 0;
+  font-size: 13px;
+  padding: 8px 16px !important;
+}
+
+/* ============================================================
    スクロールバー
    ============================================================ */
 ::-webkit-scrollbar { width: 6px; }
