@@ -452,8 +452,8 @@ async function loadAll() {
       Store.set(CONFIG.LS.MIGRATED_V5, '1');
     }
 
-    // v6マイグレーション: IDズレでプリセットが空になっていたら再リンク
-    if (!Store.get(CONFIG.LS.MIGRATED_V6)) {
+    // 「1 やることリスト」のプリセットが空なら毎回補填（IDズレ対策）
+    {
       const r1 = State.routines.find(r => r.name === '1 やることリスト');
       if (r1) {
         const p = loadPresets();
@@ -462,7 +462,6 @@ async function loadAll() {
           savePresets(p);
         }
       }
-      Store.set(CONFIG.LS.MIGRATED_V6, '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持
