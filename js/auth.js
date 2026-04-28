@@ -44,10 +44,11 @@ const Auth = {
   },
 
   // ------------------------------------------------------------
-  // サインイン（ポップアップ表示）
-  // prompt: 'select_account' でSafari ITP対策（サイレント取得が失敗するブラウザ対応）
+  // サインイン
+  // forceSelect: true のときのみアカウント選択ポップアップを表示（再認証バナー用）
+  // 通常時は prompt: '' でサイレント取得（ポップアップなし）
   // ------------------------------------------------------------
-  signIn(onSuccess, onError) {
+  signIn(onSuccess, onError, { forceSelect = false } = {}) {
     this._onSuccess = onSuccess || (() => {});
     this._onError   = onError   || (() => {});
 
@@ -62,8 +63,8 @@ const Auth = {
       return;
     }
 
-    // Safari等でサイレント取得が失敗する場合に備え、明示的にアカウント選択画面を表示
-    this.tokenClient.requestAccessToken({ prompt: 'select_account', login_hint: Store.get(CONFIG.LS.USER_EMAIL) || '' });
+    const prompt = forceSelect ? 'select_account' : '';
+    this.tokenClient.requestAccessToken({ prompt, login_hint: Store.get(CONFIG.LS.USER_EMAIL) || '' });
   },
 
   // ------------------------------------------------------------

@@ -1477,6 +1477,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = false;
         showToast('サインインエラー: ' + err, 'error');
       },
+      { forceSelect: true },
     );
   });
 
