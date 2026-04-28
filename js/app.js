@@ -401,36 +401,41 @@ async function loadAll() {
     State.todayTimeline   = todayTl;
     State.tomorrowTimeline = tomorrowTl;
 
-    // v3マイグレーション（フラグがなければ必ず1回実行）
+    // スプレッドシートに「1 やることリスト」ルーティンが存在するか
+    const alreadyHasDefaultRoutines = State.routines.some(r => !r.onetime && r.name === '1 やることリスト');
+
+    // v3マイグレーション（スプレッドシートにデータがある場合はフラグだけ立てスキップ）
     if (!Store.get('dt_migrated_v3')) {
-      State.routines = State.routines.filter(r => r.onetime);
-      await initDefaultRoutines();
-      // タイムラインをカレンダー以外クリア
-      State.todayTimeline    = State.todayTimeline.filter(i => i.itemType === 'calendar');
-      State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType === 'calendar');
-      await Promise.all([
-        Sheets.saveTimeline(State.today,    State.todayTimeline),
-        Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
-      ]).catch(() => {});
+      if (!alreadyHasDefaultRoutines) {
+        State.routines = State.routines.filter(r => r.onetime);
+        await initDefaultRoutines();
+        State.todayTimeline    = State.todayTimeline.filter(i => i.itemType === 'calendar');
+        State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType === 'calendar');
+        await Promise.all([
+          Sheets.saveTimeline(State.today,    State.todayTimeline),
+          Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
+        ]).catch(() => {});
+      }
       Store.set('dt_migrated_v3', '1');
     }
 
-    // v4マイグレーション: 12番号付きルーティンへ置き換え
+    // v4マイグレーション（スプレッドシートにデータがある場合はフラグだけ立てスキップ）
     if (!Store.get(CONFIG.LS.MIGRATED_V4)) {
-      State.routines = State.routines.filter(r => r.onetime);
-      await initDefaultRoutines();
-      // ルーティン系タイムライン項目を削除（IDが変わるため）※スコアあり項目は保持
-      const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
-      State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
-      State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
-      await Promise.all([
-        Sheets.saveTimeline(State.today,    State.todayTimeline),
-        Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
-      ]).catch(() => {});
+      if (!alreadyHasDefaultRoutines) {
+        State.routines = State.routines.filter(r => r.onetime);
+        await initDefaultRoutines();
+        const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
+        State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
+        State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
+        await Promise.all([
+          Sheets.saveTimeline(State.today,    State.todayTimeline),
+          Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
+        ]).catch(() => {});
+      }
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
 
-    // 「1 やることリスト」のプリセット初期補填（初回のみ・以降はユーザーの変更を保持）
+    // 「1 やることリスト」のプリセット初期補填（スプレッドシートにデータがある場合はスキップ）
     if (!Store.get(CONFIG.LS.MIGRATED_V7)) {
       const r1 = State.routines.find(r => r.name === '1 やることリスト');
       if (r1 && (!Array.isArray(r1.presets) || r1.presets.length === 0)) {
