@@ -398,8 +398,23 @@ async function loadAll() {
     ]);
 
     State.routines        = routines;
-    State.todayTimeline   = todayTl;
-    State.tomorrowTimeline = tomorrowTl;
+
+    // 重複排除（シートに同一行が複数ある場合に自動クリーンアップ）
+    const dedupTl = (tl) => {
+      const seen = new Set();
+      return tl.filter(i => {
+        const key = `${i.itemType}|${i.itemId}|${i.timeSlot}|${i.title}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    const cleanToday    = dedupTl(todayTl);
+    const cleanTomorrow = dedupTl(tomorrowTl);
+    if (cleanToday.length    < todayTl.length)    Sheets.saveTimeline(State.today,    cleanToday).catch(() => {});
+    if (cleanTomorrow.length < tomorrowTl.length) Sheets.saveTimeline(State.tomorrow, cleanTomorrow).catch(() => {});
+    State.todayTimeline   = cleanToday;
+    State.tomorrowTimeline = cleanTomorrow;
 
     // スプレッドシートに「1 やることリスト」ルーティンが存在するか
     const alreadyHasDefaultRoutines = State.routines.some(r => !r.onetime && r.name === '1 やることリスト');
@@ -786,7 +801,8 @@ function renderTlItem(item, date) {
 
   let titleHtml;
   if (item.itemType === 'routine') {
-    const routineItems = (loadPresets()[item.itemId]) || [];
+    const _r = State.routines.find(rt => rt.id === item.itemId);
+    const routineItems = Array.isArray(_r?.presets) ? _r.presets : [];
     if (routineItems.length > 0) {
       const opts = routineItems.map(i =>
         `<option value="${i.replace(/"/g, '&quot;')}" ${i === item.title ? 'selected' : ''}>${i}</option>`
