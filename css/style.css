@@ -381,6 +381,7 @@ body {
 
 .nav-list {
   list-style: none;
+  flex: 1;
 }
 
 .nav-item {
@@ -1994,19 +1995,11 @@ body {
 /* ============================================================
    週カレンダーウィジェット（サイドバー）
    ============================================================ */
-.sidebar-spacer-top {
-  flex: 6;
-}
-
-.sidebar-spacer-bottom {
-  flex: 1;
-}
-
 .week-cal-widget {
   padding: 10px 14px;
   border-top: 1px solid rgba(255,255,255,0.08);
   flex-shrink: 0;
-  max-height: 280px;
+  max-height: 220px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
