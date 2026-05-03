@@ -381,7 +381,6 @@ body {
 
 .nav-list {
   list-style: none;
-  flex: 1;
 }
 
 .nav-item {
@@ -411,6 +410,7 @@ body {
 .nav-label { font-size: 13px; font-weight: 500; }
 
 .sidebar-footer {
+  margin-top: auto;
   padding: 16px 20px;
   border-top: 1px solid rgba(255,255,255,0.08);
   display: flex;
