@@ -158,6 +158,16 @@ const Auth = {
     Store.del(CONFIG.LS.TOKEN_EXP);
   },
 
+  // ------------------------------------------------------------
+  // トークンをクリア（401時に呼び出す）
+  // ------------------------------------------------------------
+  clearToken() {
+    this.accessToken = null;
+    this._pendingToken = null;
+    Store.del(CONFIG.LS.ACCESS_TOKEN);
+    Store.del(CONFIG.LS.TOKEN_EXP);
+  },
+
   // プレースホルダー（init後に上書きされる）
   _onSuccess: () => {},
   _onError:   () => {},

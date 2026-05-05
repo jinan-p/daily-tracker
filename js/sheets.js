@@ -13,15 +13,35 @@ const Sheets = {
   // 内部: fetch ラッパー
   // ------------------------------------------------------------
   async _req(url, options = {}) {
-    const token = await Auth.getToken();
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+    const buildHeaders = (token) => ({
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
     });
+
+    let token = await Auth.getToken();
+    let res = await fetch(url, { ...options, headers: buildHeaders(token) });
+
+    // 401（トークン失効）→ クリアして1回だけ再取得してリトライ
+    if (res.status === 401) {
+      Auth.clearToken();
+      try {
+        token = await Auth.getToken();
+        res = await fetch(url, { ...options, headers: buildHeaders(token) });
+      } catch (_) {
+        const e = new Error('AUTH_REQUIRED');
+        e.isAuthError = true;
+        throw e;
+      }
+      // リトライ後も401なら再認証バナーを促す
+      if (res.status === 401) {
+        Auth.clearToken();
+        const e = new Error('AUTH_REQUIRED');
+        e.isAuthError = true;
+        throw e;
+      }
+    }
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error?.message || `Sheets API error: ${res.status}`);

@@ -1999,7 +1999,7 @@ body {
   padding: 10px 14px;
   border-top: 1px solid rgba(255,255,255,0.08);
   flex-shrink: 0;
-  max-height: 220px;
+  max-height: 320px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

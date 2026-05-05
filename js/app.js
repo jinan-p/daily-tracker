@@ -192,11 +192,15 @@ async function renderScoreHistory() {
 // ============================================================
 // Google Identity Services のロード待ち
 // ============================================================
-function waitForGoogle(callback) {
+function waitForGoogle(callback, _start) {
+  const start = _start || Date.now();
   if (typeof google !== 'undefined' && google.accounts) {
     callback();
+  } else if (Date.now() - start > 15000) {
+    // 15秒たってもGoogleスクリプトが読み込まれなかった場合
+    showToast('Googleの読み込みに失敗しました。ページを再読み込みしてください。', 'error');
   } else {
-    setTimeout(() => waitForGoogle(callback), 100);
+    setTimeout(() => waitForGoogle(callback, start), 100);
   }
 }
 
@@ -495,7 +499,12 @@ async function loadAll() {
   } catch (e) {
     done();
     try { renderAll(); } catch (re) { console.error('renderAll error in loadAll catch:', re); }
-    showToast('読み込みエラー: ' + (e.message || e) + ' — 同期ボタン🔄で再試行', 'error');
+    // 401/認証エラー → 再認証バナーを表示（エラートーストではなく）
+    if (e.isAuthError || e.message === 'AUTH_REQUIRED') {
+      showAuthBanner();
+    } else {
+      showToast('読み込みエラー: ' + (e.message || e) + ' — 同期ボタン🔄で再試行', 'error');
+    }
   }
 }
 
