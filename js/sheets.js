@@ -19,6 +19,13 @@ const Sheets = {
       ...(options.headers || {}),
     });
 
+    // トークン期限切れを即座に検知（Safariでの15秒サイレント失敗を回避）
+    if (Auth.isExpired()) {
+      const e = new Error('AUTH_REQUIRED');
+      e.isAuthError = true;
+      throw e;
+    }
+
     let token = await Auth.getToken();
     let res = await fetch(url, { ...options, headers: buildHeaders(token) });
 

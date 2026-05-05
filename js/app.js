@@ -41,6 +41,8 @@ const State = {
   editRoutineId:     null,
   panelTab:          'routine',  // 'routine' | 'onetime'
   routineSelections: {},         // { [routineId]: selectedIndex }
+  // 認証エラーで保存できなかったデータを保持（再認証後に自動フラッシュ）
+  _pendingSaves: { timelines: {}, routines: false },
 };
 
 // ============================================================
@@ -307,6 +309,40 @@ function hideAuthBanner() {
   document.getElementById('authBanner').classList.add('hidden');
 }
 
+// 保存エラーの共通ハンドラ
+// 認証エラー → バナー表示＋保留登録、それ以外 → トースト
+function handleSaveError(e, type, date) {
+  if (e && (e.isAuthError || e.message === 'AUTH_REQUIRED')) {
+    if (type === 'routines') {
+      State._pendingSaves.routines = true;
+    } else if (type === 'timeline' && date) {
+      State._pendingSaves.timelines[date] =
+        date === State.today ? [...State.todayTimeline] : [...State.tomorrowTimeline];
+    }
+    showAuthBanner();
+  } else {
+    showToast('保存に失敗しました' + (e?.message ? '（' + e.message + '）' : ''), 'error');
+  }
+}
+
+// 再認証後に保留中の保存を一括送信
+async function flushPendingSaves() {
+  const { timelines, routines } = State._pendingSaves;
+  State._pendingSaves = { timelines: {}, routines: false };
+
+  const jobs = [];
+  for (const [date, items] of Object.entries(timelines)) {
+    jobs.push(Sheets.saveTimeline(date, items).catch(e => console.warn('flush timeline error:', e)));
+  }
+  if (routines) {
+    jobs.push(Sheets.saveAllRoutines(State.routines).catch(e => console.warn('flush routines error:', e)));
+  }
+  if (jobs.length > 0) {
+    await Promise.all(jobs);
+    showToast('保留中の保存を完了しました ✅');
+  }
+}
+
 // ============================================================
 // アプリ起動
 // ============================================================
@@ -544,7 +580,11 @@ async function navigateDates(delta) {
 
     renderAll();
   } catch (e) {
-    showToast('読み込みエラー: ' + e.message, 'error');
+    if (e.isAuthError || e.message === 'AUTH_REQUIRED') {
+      showAuthBanner();
+    } else {
+      showToast('読み込みエラー: ' + e.message, 'error');
+    }
   }
 }
 
@@ -972,7 +1012,7 @@ function onPanelCardDrop(e) {
 
   State.dragging = null;
   renderAll();
-  Sheets.saveAllRoutines(State.routines).catch(() => showToast('並び順の保存に失敗しました', 'error'));
+  Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
 }
 
 // ============================================================
@@ -986,8 +1026,8 @@ function scheduleSave(date) {
     const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
     try {
       await Sheets.saveTimeline(date, tl);
-    } catch {
-      showToast('保存に失敗しました', 'error');
+    } catch (e) {
+      handleSaveError(e, 'timeline', date);
     }
   }, 1500);
 }
@@ -1269,7 +1309,7 @@ function deletePresetItem(routineId, idx) {
   r.presets.splice(idx, 1);
   renderRoutineSettings();
   renderRoutinesPanel();
-  Sheets.saveAllRoutines(State.routines).catch(() => showToast('保存に失敗しました', 'error'));
+  Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
 }
 
 function addPresetItemById(routineId, value, inputEl) {
@@ -1281,7 +1321,7 @@ function addPresetItemById(routineId, value, inputEl) {
   if (inputEl) inputEl.value = '';
   renderRoutineSettings();
   renderRoutinesPanel();
-  Sheets.saveAllRoutines(State.routines).catch(() => showToast('保存に失敗しました', 'error'));
+  Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
   showToast('項目を追加しました ✅');
 }
 
@@ -1291,7 +1331,7 @@ async function toggleRoutineActive(routineId, active) {
   r.active = active;
   renderAll();
   try { await Sheets.saveAllRoutines(State.routines); }
-  catch { showToast('保存に失敗しました', 'error'); }
+  catch (e) { handleSaveError(e, 'routines'); }
 }
 
 function openAddRoutine(isOnetime = false) {
@@ -1333,7 +1373,7 @@ async function saveRoutine() {
     await Sheets.saveAllRoutines(State.routines);
     showToast('保存しました ✅');
   } catch (e) {
-    showToast('保存エラー: ' + e.message, 'error');
+    handleSaveError(e, 'routines');
   }
 }
 
@@ -1344,8 +1384,8 @@ async function deleteRoutine(routineId) {
   try {
     await Sheets.saveAllRoutines(State.routines);
     showToast('削除しました');
-  } catch {
-    showToast('削除に失敗しました', 'error');
+  } catch (e) {
+    handleSaveError(e, 'routines');
   }
 }
 
@@ -1496,6 +1536,8 @@ document.addEventListener('DOMContentLoaded', () => {
         Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
         try {
           await Sheets.ensureTimelineSheet();
+          // 保留中の保存を先にフラッシュ（失敗した保存内容を復元）
+          await flushPendingSaves();
           await loadAll();
         } catch (e) {
           console.error('reAuth loadAll error:', e);
