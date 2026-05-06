@@ -1020,16 +1020,33 @@ function onPanelCardDrop(e) {
 // ============================================================
 const _saveTimers = {};
 
+// ============================================================
+// バックグラウンド移行時の即時保存フラッシュ
+// iOSでホームボタン／電源オフ直前に保留中の保存をすべて送信する
+// keepalive:true でページが閉じられても送信を完了させる
+// ============================================================
+function flushActiveTimelines({ keepalive = false } = {}) {
+  const dates = Object.keys(_saveTimers).filter(d => _saveTimers[d]);
+  if (dates.length === 0) return;
+  dates.forEach(date => {
+    clearTimeout(_saveTimers[date]);
+    delete _saveTimers[date];
+    const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+    Sheets.saveTimelineKeepalive(date, tl, keepalive).catch(e => handleSaveError(e, 'timeline', date));
+  });
+}
+
 function scheduleSave(date) {
   if (_saveTimers[date]) clearTimeout(_saveTimers[date]);
   _saveTimers[date] = setTimeout(async () => {
+    delete _saveTimers[date];
     const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
     try {
       await Sheets.saveTimeline(date, tl);
     } catch (e) {
       handleSaveError(e, 'timeline', date);
     }
-  }, 1500);
+  }, 800);
 }
 
 // ============================================================
@@ -1451,6 +1468,18 @@ function saveSettings() {
 // DOMContentLoaded
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+
+  // バックグラウンド移行・電源オフ直前に保留中の保存をフラッシュ
+  // iOS Safari はホームボタンで visibilitychange が発火する
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushActiveTimelines({ keepalive: true });
+    }
+  });
+  // 念のため pagehide でも（一部ブラウザで visibilitychange が発火しない場合）
+  window.addEventListener('pagehide', () => {
+    flushActiveTimelines({ keepalive: true });
+  });
 
   // セットアップ済みかチェック
   if (Store.get(CONFIG.LS.SETUP_DONE)) {

@@ -26,15 +26,18 @@ const Sheets = {
       throw e;
     }
 
+    // keepalive はページ終了後もリクエストを続けさせるフラグ（options経由で渡す）
+    const { keepalive = false, ...fetchOptions } = options;
+
     let token = await Auth.getToken();
-    let res = await fetch(url, { ...options, headers: buildHeaders(token) });
+    let res = await fetch(url, { ...fetchOptions, headers: buildHeaders(token), keepalive });
 
     // 401（トークン失効）→ クリアして1回だけ再取得してリトライ
     if (res.status === 401) {
       Auth.clearToken();
       try {
         token = await Auth.getToken();
-        res = await fetch(url, { ...options, headers: buildHeaders(token) });
+        res = await fetch(url, { ...fetchOptions, headers: buildHeaders(token), keepalive });
       } catch (_) {
         const e = new Error('AUTH_REQUIRED');
         e.isAuthError = true;
@@ -143,12 +146,14 @@ const Sheets = {
 
   // ------------------------------------------------------------
   // 内部: 範囲を上書き書き込み
+  // keepalive: ページが閉じられても送信を完了させる（バックグラウンド移行時に使用）
   // ------------------------------------------------------------
-  async _write(range, values) {
+  async _write(range, values, { keepalive = false } = {}) {
     const url = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
     return this._req(url, {
       method: 'PUT',
       body: JSON.stringify({ range, values }),
+      keepalive,
     });
   },
 
@@ -187,11 +192,18 @@ const Sheets = {
       r.id, r.name, r.category, r.duration, r.active ? 'TRUE' : 'FALSE', i, r.onetime ? 'TRUE' : 'FALSE',
       JSON.stringify(Array.isArray(r.presets) ? r.presets : []),
     ]);
-    // まず既存をクリア（ヘッダー行除く）
-    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.ROUTINES + '!A2:H1000')}:clear`;
-    await this._req(clearUrl, { method: 'POST', body: '{}' });
+    // 現在の行数を把握（余剰行クリア用）
+    const current = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:A1000`);
+    const oldCount = current.length;
+    // ① 先に書き込む（消去前に書くことで電源断によるデータ消失を防ぐ）
     if (values.length > 0) {
       await this._write(`${CONFIG.SHEET.ROUTINES}!A2`, values);
+    }
+    // ② 行数が減った場合のみ余剰行を後からクリア
+    if (oldCount > values.length) {
+      const startRow = values.length + 2;
+      const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(`${CONFIG.SHEET.ROUTINES}!A${startRow}:H${oldCount + 1}`)}:clear`;
+      await this._req(clearUrl, { method: 'POST', body: '{}' }).catch(() => {});
     }
   },
 
@@ -297,6 +309,7 @@ const Sheets = {
 
   async getTimeline(date) {
     const rows = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
+    this._timelineCache = rows; // keepalive 保存用キャッシュを更新
     return rows
       .filter(r => r[0] === date)
       .map(r => ({
@@ -311,6 +324,7 @@ const Sheets = {
 
   async saveTimeline(date, items) {
     const all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
+    const oldCount = all.length;
     const others = all.filter(r => r[0] !== date);
     const dateRows = items.map(item => [
       date, item.itemType, item.itemId, item.timeSlot, item.title,
@@ -318,11 +332,41 @@ const Sheets = {
     ]);
     const newAll = [...others, ...dateRows];
 
-    const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(CONFIG.SHEET.TIMELINE + '!A2:F10000')}:clear`;
-    await this._req(clearUrl, { method: 'POST', body: '{}' });
+    // ① 先に書き込む（消去前に書くことで電源断によるデータ消失を防ぐ）
     if (newAll.length > 0) {
       await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll);
     }
+    this._timelineCache = newAll; // keepalive 保存用キャッシュを更新
+    // ② 行数が減った場合のみ余剰行を後からクリア
+    if (oldCount > newAll.length) {
+      const startRow = newAll.length + 2;
+      const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(`${CONFIG.SHEET.TIMELINE}!A${startRow}:F${oldCount + 1}`)}:clear`;
+      await this._req(clearUrl, { method: 'POST', body: '{}' }).catch(() => {});
+    }
+  },
+
+  // タイムラインシートの最終読み込みキャッシュ（keepalive保存でネットワーク読み取りを省略するため）
+  _timelineCache: null,
+
+  // バックグラウンド移行時に keepalive:true で即時保存するバリアント
+  // キャッシュを使うことで READ を省略し、他日付データを壊さない
+  async saveTimelineKeepalive(date, items, keepalive = true) {
+    if (!items || items.length === 0) return;
+    // キャッシュがない場合は通常保存にフォールバック（ページ終了時でなければ問題ない）
+    if (!this._timelineCache) {
+      return this.saveTimeline(date, items);
+    }
+    const others = this._timelineCache.filter(r => r[0] !== date);
+    const dateRows = items.map(item => [
+      date, item.itemType, item.itemId, item.timeSlot, item.title,
+      item.score !== null && item.score !== undefined ? item.score : '',
+    ]);
+    const newAll = [...others, ...dateRows];
+    this._timelineCache = newAll; // キャッシュを更新
+    if (newAll.length > 0) {
+      await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll, { keepalive });
+    }
+    // keepalive 時は余剰行クリアをスキップ（次回 loadAll で整合）
   },
 
   // ============================================================
