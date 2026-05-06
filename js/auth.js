@@ -7,6 +7,8 @@ const Auth = {
   accessToken: null,
   _pendingToken: null,
   _refreshTimer: null,
+  // サイレントリフレッシュが失敗したときに呼ぶコールバック（app.js で設定）
+  onRefreshFail: null,
 
   // ------------------------------------------------------------
   // 初期化：Google Identity Services のクライアントを作る
@@ -93,7 +95,7 @@ const Auth = {
       const timer = setTimeout(() => {
         this._pendingToken = null;
         reject('タイムアウト');
-      }, 8000);
+      }, 3000); // Safari ITP でのサイレント失敗を早く検知するため 3 秒に短縮
       this._onSuccess = (res) => {
         clearTimeout(timer);
         this._pendingToken = null;
@@ -117,7 +119,13 @@ const Auth = {
     const delay = Math.max(expMs - 10 * 60 * 1000, 30 * 1000); // 10分前、最低30秒
     this._refreshTimer = setTimeout(() => {
       this._refreshTimer = null;
-      this.silentSignIn().catch(() => {}); // 失敗しても無視（次のAPI呼び出し時に再試行）
+      this.silentSignIn().catch(() => {
+        // Safari ITP等でサイレント更新が失敗 → トークンはまだ有効なうちに再認証バナーを表示
+        // （突然の切断ではなく、ユーザーが都合のいいタイミングで再認証できる）
+        if (typeof this.onRefreshFail === 'function') {
+          this.onRefreshFail();
+        }
+      });
     }, delay);
   },
 

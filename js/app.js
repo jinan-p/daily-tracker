@@ -302,10 +302,17 @@ function showStep(stepId) {
 // ============================================================
 // 再認証バナー
 // ============================================================
-function showAuthBanner() {
+function showAuthBanner(msg) {
+  if (msg) {
+    const el = document.getElementById('authBannerMsg');
+    if (el) el.textContent = msg;
+  }
   document.getElementById('authBanner').classList.remove('hidden');
 }
 function hideAuthBanner() {
+  // バナーを閉じたらメッセージをデフォルトに戻す
+  const el = document.getElementById('authBannerMsg');
+  if (el) el.textContent = 'Googleとの接続が切れました。再度サインインしてください。';
   document.getElementById('authBanner').classList.add('hidden');
 }
 
@@ -365,6 +372,12 @@ async function launchApp() {
   renderAll();
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
+
+  // サイレントリフレッシュ失敗時のコールバック設定
+  // → トークンがまだ有効なうちに先手でバナーを表示し、突然の切断を防ぐ
+  Auth.onRefreshFail = () => showAuthBanner(
+    '⏰ Googleの認証期限が近づいています。サインインして継続してください。'
+  );
 
   // サイレント再認証を試みる（Googleにログイン済みならポップアップなしで成功）
   if (Auth.isExpired()) {
@@ -1565,7 +1578,9 @@ document.addEventListener('DOMContentLoaded', () => {
         Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
         try {
           await Sheets.ensureTimelineSheet();
-          // 保留中の保存を先にフラッシュ（失敗した保存内容を復元）
+          // デバウンス中の保存を即時フラッシュ（再認証前の変更を失わないため）
+          flushActiveTimelines();
+          // 認証エラーで保留になっていた保存をフラッシュ
           await flushPendingSaves();
           await loadAll();
         } catch (e) {
