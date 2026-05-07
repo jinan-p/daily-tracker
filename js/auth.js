@@ -7,8 +7,6 @@ const Auth = {
   accessToken: null,
   _pendingToken: null,
   _refreshTimer: null,
-  // サイレントリフレッシュが失敗したときに呼ぶコールバック（app.js で設定）
-  onRefreshFail: null,
 
   // ------------------------------------------------------------
   // 初期化：Google Identity Services のクライアントを作る
@@ -113,18 +111,24 @@ const Auth = {
 
   // ------------------------------------------------------------
   // 期限の10分前にサイレントリフレッシュをスケジュール
+  // 失敗しても 2 分おきに最大 3 回まで再試行する。
+  // バナーは出さない（次の操作でトークン切れが検知されたときに自然に出る）
   // ------------------------------------------------------------
   _scheduleRefresh(expMs) {
     if (this._refreshTimer) clearTimeout(this._refreshTimer);
-    const delay = Math.max(expMs - 10 * 60 * 1000, 30 * 1000); // 10分前、最低30秒
+    const firstDelay = Math.max(expMs - 10 * 60 * 1000, 30 * 1000); // 10分前、最低30秒
+    this._scheduleRefreshAttempt(firstDelay, 0);
+  },
+
+  _scheduleRefreshAttempt(delay, attempt) {
     this._refreshTimer = setTimeout(() => {
       this._refreshTimer = null;
       this.silentSignIn().catch(() => {
-        // Safari ITP等でサイレント更新が失敗 → トークンはまだ有効なうちに再認証バナーを表示
-        // （突然の切断ではなく、ユーザーが都合のいいタイミングで再認証できる）
-        if (typeof this.onRefreshFail === 'function') {
-          this.onRefreshFail();
+        if (attempt < 2) {
+          // 失敗：2分後に再試行（最大3回）
+          this._scheduleRefreshAttempt(2 * 60 * 1000, attempt + 1);
         }
+        // 3回とも失敗した場合はバナーを出さず、次の操作時に自然に検知させる
       });
     }, delay);
   },

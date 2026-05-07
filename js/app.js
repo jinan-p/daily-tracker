@@ -373,12 +373,6 @@ async function launchApp() {
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
 
-  // サイレントリフレッシュ失敗時のコールバック設定
-  // → トークンがまだ有効なうちに先手でバナーを表示し、突然の切断を防ぐ
-  Auth.onRefreshFail = () => showAuthBanner(
-    '⏰ Googleの認証期限が近づいています。サインインして継続してください。'
-  );
-
   // サイレント再認証を試みる（Googleにログイン済みならポップアップなしで成功）
   if (Auth.isExpired()) {
     try {
@@ -1567,34 +1561,48 @@ document.addEventListener('DOMContentLoaded', () => {
   // 再認証バナーのサインインボタン
   document.getElementById('btnReAuth').addEventListener('click', () => {
     const btn = document.getElementById('btnReAuth');
+    const originalHTML = btn.innerHTML;
     btn.textContent = 'サインイン中...';
     btn.disabled = true;
-    Auth.signIn(
-      async (res) => {
-        // サインイン成功 → バナーを閉じてデータ読み込み
-        btn.textContent = 'Googleでサインイン';
-        btn.disabled = false;
-        hideAuthBanner();
-        Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
-        try {
-          await Sheets.ensureTimelineSheet();
-          // デバウンス中の保存を即時フラッシュ（再認証前の変更を失わないため）
-          flushActiveTimelines();
-          // 認証エラーで保留になっていた保存をフラッシュ
-          await flushPendingSaves();
-          await loadAll();
-        } catch (e) {
-          console.error('reAuth loadAll error:', e);
-          showToast('読み込みエラー: ' + (e.message || e), 'error');
-        }
-      },
-      (err) => {
-        btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/></svg> Googleでサインイン';
-        btn.disabled = false;
-        showToast('サインインエラー: ' + err, 'error');
-      },
-      { forceSelect: true },
-    );
+
+    let done = false; // 二重コールバック防止フラグ
+
+    const onSuccess = async () => {
+      if (done) return;
+      done = true;
+      btn.innerHTML = originalHTML;
+      btn.disabled = false;
+      hideAuthBanner();
+      Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
+      try {
+        await Sheets.ensureTimelineSheet();
+        flushActiveTimelines();
+        await flushPendingSaves();
+        await loadAll();
+      } catch (e) {
+        console.error('reAuth loadAll error:', e);
+        showToast('読み込みエラー: ' + (e.message || e), 'error');
+      }
+    };
+
+    const onError = (err) => {
+      if (done) return;
+      done = true;
+      btn.innerHTML = originalHTML;
+      btn.disabled = false;
+      showToast('サインインエラー: ' + err, 'error');
+    };
+
+    // ① まずサイレント認証を試みる（Googleセッションが有効なら選択不要で即完了）
+    Auth.signIn(onSuccess, onError, { forceSelect: false });
+
+    // ② 3秒以内に完了しない場合はアカウント選択画面に切り替え
+    // （Safariでサイレント認証が詰まった場合のフォールバック）
+    setTimeout(() => {
+      if (!done) {
+        Auth.signIn(onSuccess, onError, { forceSelect: true });
+      }
+    }, 3000);
   });
 
   // 日付ナビゲーション（ボタン）
