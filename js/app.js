@@ -446,6 +446,17 @@ async function loadAll() {
 
     State.routines        = routines;
 
+    // 読み込み後に番号を振り直す（表示順と名前の番号がズレていたら修正して保存）
+    {
+      const nonOnetime = State.routines.filter(r => !r.onetime);
+      const before = nonOnetime.map(r => r.name).join('|');
+      renumberRoutines(nonOnetime);
+      const after = nonOnetime.map(r => r.name).join('|');
+      if (before !== after) {
+        Sheets.saveAllRoutines(State.routines).catch(() => {});
+      }
+    }
+
     // 重複排除（シートに同一行が複数ある場合に自動クリーンアップ）
     const dedupTl = (tl) => {
       const seen = new Set();
