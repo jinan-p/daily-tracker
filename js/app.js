@@ -1178,9 +1178,9 @@ async function reorderRoutineSettings(fromId, toId) {
   renderRoutinesPanel();
   try {
     await Sheets.saveAllRoutines(State.routines);
-    showToast('並び順を保存しました');
+    showToast('並び順を保存しました ✅');
   } catch (e) {
-    showToast('並び順の保存に失敗しました', 'error');
+    handleSaveError(e, 'routines');
   }
 }
 
@@ -1233,7 +1233,9 @@ function renderRoutineSettings() {
     el.addEventListener('dragstart', e => {
       _settingDrag = { fromId: el.dataset.id };
       e.dataTransfer.effectAllowed = 'move';
-      setTimeout(() => el.classList.add('setting-dragging'), 0);
+      // Safari はこの setData がないとドロップを受け付けない
+      e.dataTransfer.setData('text/plain', el.dataset.id);
+      el.classList.add('setting-dragging');
     });
     el.addEventListener('dragend', () => {
       el.classList.remove('setting-dragging');
@@ -1247,7 +1249,11 @@ function renderRoutineSettings() {
       container.querySelectorAll('.routine-setting-item').forEach(x => x.classList.remove('setting-drag-over'));
       el.classList.add('setting-drag-over');
     });
-    el.addEventListener('dragleave', () => el.classList.remove('setting-drag-over'));
+    el.addEventListener('dragleave', e => {
+      // 子要素への移動は無視（チラつき防止）
+      if (el.contains(e.relatedTarget)) return;
+      el.classList.remove('setting-drag-over');
+    });
     el.addEventListener('drop', e => {
       e.preventDefault();
       e.stopPropagation();
@@ -1256,7 +1262,7 @@ function renderRoutineSettings() {
       reorderRoutineSettings(_settingDrag.fromId, el.dataset.id);
       _settingDrag = null;
     });
-    // ボタン類がドラッグを誤発火させないように
+    // ボタン・入力欄のクリックがドラッグを誤発火させないように
     el.querySelectorAll('button, input, label, select').forEach(b =>
       b.addEventListener('mousedown', ev => ev.stopPropagation())
     );
