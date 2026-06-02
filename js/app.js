@@ -133,7 +133,7 @@ async function loadWeekCalWidget() {
   try {
     const weekEvents = await Calendar.getWeekEvents(State.actualToday);
     list.innerHTML = '';
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 14; i++) {
       const date   = addDays(State.actualToday, i);
       const events = weekEvents[date] || [];
       const dayEl  = document.createElement('div');

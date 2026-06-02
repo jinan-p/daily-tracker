@@ -55,9 +55,9 @@ const Calendar = {
     }
     const token = Auth.accessToken;
 
-    // 7日後の日付を計算
+    // 14日後の日付を計算
     const endD = new Date(startDateStr + 'T00:00:00');
-    endD.setDate(endD.getDate() + 6);
+    endD.setDate(endD.getDate() + 13);
     const pad = n => String(n).padStart(2, '0');
     const endDateStr = `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}`;
 
@@ -81,9 +81,9 @@ const Calendar = {
 
     const data = await res.json();
 
-    // 7日分の空配列で初期化
+    // 14日分の空配列で初期化
     const byDate = {};
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 14; i++) {
       const d = new Date(startDateStr + 'T00:00:00');
       d.setDate(d.getDate() + i);
       byDate[`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`] = [];
