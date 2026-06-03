@@ -37,6 +37,7 @@ const CONFIG = {
     MIGRATED_V5:  'dt_migrated_v5',
     MIGRATED_V6:  'dt_migrated_v6',
     MIGRATED_V7:  'dt_migrated_v7',
+    MIGRATED_V8:  'dt_migrated_v8',
   },
 };
 

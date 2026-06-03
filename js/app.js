@@ -9,9 +9,10 @@ const TIME_SLOTS = (() => {
   const slots = [];
   for (let h = 5; h <= 21; h++) {
     slots.push(String(h).padStart(2, '0') + ':00');
-    slots.push(String(h).padStart(2, '0') + ':30');
+    slots.push(String(h).padStart(2, '0') + ':20');
+    slots.push(String(h).padStart(2, '0') + ':40');
   }
-  return slots; // 34スロット: 05:00, 05:30 ... 21:00, 21:30
+  return slots; // 51スロット: 05:00, 05:20, 05:40 ... 21:00, 21:20, 21:40
 })();
 
 const YARUKOTO_PRESETS = [
@@ -114,13 +115,16 @@ function getRoutineIcon() {
   return '';
 }
 
-// カレンダーの時刻を 30 分単位スロットに丸める
+// カレンダーの時刻を 20 分単位スロットに丸める
 function roundToSlot(timeStr) {
   if (!timeStr || timeStr === '終日') return null;
   const [h, m] = timeStr.split(':').map(Number);
   if (isNaN(h) || h < 5 || h > 21) return null;
-  const roundedM = m >= 30 ? 30 : 0;
-  const slot = String(h).padStart(2, '0') + ':' + String(roundedM).padStart(2, '0');
+  let rH = h;
+  let rM = Math.round(m / 20) * 20;
+  if (rM === 60) { rH++; rM = 0; }
+  if (rH > 21) return null;
+  const slot = String(rH).padStart(2, '0') + ':' + String(rM).padStart(2, '0');
   return TIME_SLOTS.includes(slot) ? slot : null;
 }
 
@@ -415,7 +419,7 @@ async function initDefaultRoutines() {
   names.forEach((name, i) => {
     const id = genId();
     const presets = i === 0 ? [...YARUKOTO_PRESETS] : [];
-    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false, presets });
+    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false, presets, noteMode: false });
   });
   await Sheets.saveAllRoutines(State.routines);
 }
@@ -516,6 +520,22 @@ async function loadAll() {
         Sheets.saveAllRoutines(State.routines).catch(() => {});
       }
       Store.set(CONFIG.LS.MIGRATED_V7, '1');
+    }
+
+    // v8マイグレーション：「動画」ルーティンを追加（noteMode: true）
+    if (!Store.get(CONFIG.LS.MIGRATED_V8)) {
+      const alreadyHasDouga = State.routines.some(r => !r.onetime && r.name.replace(/^\d+\s+/, '') === '動画');
+      if (!alreadyHasDouga) {
+        const nonOnetime = State.routines.filter(r => !r.onetime);
+        const nextOrder  = nonOnetime.length;
+        State.routines.push({
+          id: genId(), name: `${nextOrder + 1} 動画`, category: 'default',
+          duration: '', active: true, order: nextOrder, onetime: false, presets: [], noteMode: true,
+        });
+        renumberRoutines(State.routines.filter(r => !r.onetime));
+        Sheets.saveAllRoutines(State.routines).catch(() => {});
+      }
+      Store.set(CONFIG.LS.MIGRATED_V8, '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持
@@ -834,6 +854,21 @@ function renderTimeline(containerId, timeline, date) {
       });
     });
 
+    container.querySelectorAll('.tl-note-input').forEach(inp => {
+      inp.addEventListener('mousedown', e => e.stopPropagation());
+      inp.addEventListener('click',     e => e.stopPropagation());
+      inp.addEventListener('input', e => {
+        e.stopPropagation();
+        const tl = inp.dataset.date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+        const item = tl.find(i => i.itemId === inp.dataset.id && i.timeSlot === inp.dataset.slot);
+        if (item) {
+          item.title = inp.value;
+          inp.closest('.tl-item').dataset.title = inp.value;
+          scheduleSave(inp.dataset.date);
+        }
+      });
+    });
+
     container.querySelectorAll('.tl-item-remove').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -870,7 +905,12 @@ function renderTlItem(item, date) {
   if (item.itemType === 'routine') {
     const _r = State.routines.find(rt => rt.id === item.itemId);
     const routineItems = Array.isArray(_r?.presets) ? _r.presets : [];
-    if (routineItems.length > 0) {
+    if (_r?.noteMode) {
+      // 感想メモ入力欄
+      titleHtml = `<input type="text" class="tl-note-input"
+        data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}"
+        placeholder="感想を入力…" value="${safe}">`;
+    } else if (routineItems.length > 0) {
       const opts = routineItems.map(i =>
         `<option value="${i.replace(/"/g, '&quot;')}" ${i === item.title ? 'selected' : ''}>${i}</option>`
       ).join('');
@@ -1220,6 +1260,10 @@ function renderRoutineSettings() {
           <span class="routine-drag-handle" title="ドラッグで並び替え">⠿</span>
           <span class="routine-setting-name">${r.name}</span>
           <div class="routine-setting-actions">
+            <label class="note-mode-label" title="感想メモ欄をタイムラインに表示する">
+              <input type="checkbox" ${r.noteMode ? 'checked' : ''} data-id="${r.id}" class="note-mode-toggle">
+              <span class="note-mode-text">📝感想</span>
+            </label>
             <label class="toggle-switch">
               <input type="checkbox" ${r.active ? 'checked' : ''} data-id="${r.id}" class="routine-toggle">
               <span class="toggle-slider"></span>
@@ -1279,6 +1323,15 @@ function renderRoutineSettings() {
     );
   });
 
+  container.querySelectorAll('.note-mode-toggle').forEach(el => {
+    el.addEventListener('change', () => {
+      const r = State.routines.find(rt => rt.id === el.dataset.id);
+      if (!r) return;
+      r.noteMode = el.checked;
+      renderAll();
+      Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
+    });
+  });
   container.querySelectorAll('.routine-toggle').forEach(el => {
     el.addEventListener('change', () => toggleRoutineActive(el.dataset.id, el.checked));
   });

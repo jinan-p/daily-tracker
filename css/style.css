@@ -1625,6 +1625,52 @@ body {
   border-radius: 4px;
 }
 
+/* 感想メモ入力欄（noteMode） */
+.tl-note-input {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255,255,255,0.25);
+  outline: none;
+  font-family: inherit;
+  padding: 1px 4px;
+  min-width: 0;
+}
+.tl-note-input::placeholder {
+  color: rgba(255,255,255,0.35);
+  font-style: italic;
+}
+.tl-note-input:focus {
+  border-bottom-color: var(--primary);
+}
+
+/* 感想メモ トグル */
+.note-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.note-mode-toggle { display: none; }
+.note-mode-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.note-mode-toggle:checked + .note-mode-text {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
 .tl-score-badge {
   font-size: 11px;
   font-weight: 700;

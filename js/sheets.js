@@ -173,7 +173,7 @@ const Sheets = {
   // ============================================================
 
   async getRoutines() {
-    const rows = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:H1000`);
+    const rows = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:I1000`);
     return rows.map(r => ({
       id:       r[0] || '',
       name:     r[1] || '',
@@ -183,6 +183,7 @@ const Sheets = {
       order:    parseInt(r[5] || '0', 10),
       onetime:  r[6] === 'TRUE',
       presets:  (() => { try { return JSON.parse(r[7] || '[]'); } catch { return []; } })(),
+      noteMode: r[8] === 'TRUE',
     })).sort((a, b) => a.order - b.order);
   },
 
@@ -191,6 +192,7 @@ const Sheets = {
     const values = routines.map((r, i) => [
       r.id, r.name, r.category, r.duration, r.active ? 'TRUE' : 'FALSE', i, r.onetime ? 'TRUE' : 'FALSE',
       JSON.stringify(Array.isArray(r.presets) ? r.presets : []),
+      r.noteMode ? 'TRUE' : 'FALSE',
     ]);
     // 現在の行数を把握（余剰行クリア用）
     const current = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:A1000`);
@@ -202,7 +204,7 @@ const Sheets = {
     // ② 行数が減った場合のみ余剰行を後からクリア
     if (oldCount > values.length) {
       const startRow = values.length + 2;
-      const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(`${CONFIG.SHEET.ROUTINES}!A${startRow}:H${oldCount + 1}`)}:clear`;
+      const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(`${CONFIG.SHEET.ROUTINES}!A${startRow}:I${oldCount + 1}`)}:clear`;
       await this._req(clearUrl, { method: 'POST', body: '{}' }).catch(() => {});
     }
   },
