@@ -377,13 +377,27 @@ async function launchApp() {
 
   Sheets.init(Store.get(CONFIG.LS.SHEET_ID));
 
-  // サイレント再認証を試みる（Googleにログイン済みならポップアップなしで成功）
+  // ローカルデータがあれば即時起動（認証不要・バナーなし）
+  if (loadFromLocal()) {
+    renderAll();
+    renderRoutinesPanel();
+    renderRoutineSettings();
+    // バックグラウンドで Sheets・Calendar を同期（失敗しても無視）
+    Auth.silentSignIn()
+      .then(() => {
+        Sheets.ensureTimelineSheet().catch(() => {});
+        loadAll({ silent: true }).catch(() => {});
+      })
+      .catch(() => {}); // Safari ITP 等でサイレント失敗しても無視
+    return;
+  }
+
+  // ローカルデータなし（初回 / 新デバイス）→ Sheets 認証が必要
   if (Auth.isExpired()) {
     try {
       await Auth.silentSignIn();
     } catch (_) {
-      // サイレント失敗 → バナーを表示してユーザーに明示的なボタンクリックを促す
-      showAuthBanner();
+      showAuthBanner('初回読み込みにはGoogleサインインが必要です');
       return;
     }
   }
@@ -421,23 +435,25 @@ async function initDefaultRoutines() {
     const presets = i === 0 ? [...YARUKOTO_PRESETS] : [];
     State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false, presets, noteMode: false });
   });
+  Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines)); // localStorage にも保存
   await Sheets.saveAllRoutines(State.routines);
 }
 
 // ============================================================
 // データ読み込み
 // ============================================================
-async function loadAll() {
+// silent: true のとき、スピナーを出さず認証エラーもバナーを出さない（バックグラウンド同期用）
+async function loadAll({ silent = false } = {}) {
   const syncBtn = document.getElementById('btnSync');
   const origLabel = syncBtn?.textContent;
-  if (syncBtn) { syncBtn.textContent = '⏳'; syncBtn.disabled = true; }
+  if (!silent && syncBtn) { syncBtn.textContent = '⏳'; syncBtn.disabled = true; }
 
-  const done = () => { if (syncBtn) { syncBtn.textContent = origLabel; syncBtn.disabled = false; } };
+  const done = () => { if (!silent && syncBtn) { syncBtn.textContent = origLabel; syncBtn.disabled = false; } };
 
-  // トークンが期限切れの場合は再認証バナーを表示（Safariでポップアップが動かないため）
+  // トークンが期限切れの場合の処理
   if (Auth.isExpired()) {
     done();
-    showAuthBanner();
+    if (!silent) showAuthBanner();
     return;
   }
 
@@ -449,6 +465,7 @@ async function loadAll() {
     ]);
 
     State.routines        = routines;
+    Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines)); // localStorage にも保存
 
     // 読み込み後に番号を振り直す（表示順と名前の番号がズレていたら修正して保存）
     {
@@ -475,8 +492,10 @@ async function loadAll() {
     const cleanTomorrow = dedupTl(tomorrowTl);
     if (cleanToday.length    < todayTl.length)    Sheets.saveTimeline(State.today,    cleanToday).catch(() => {});
     if (cleanTomorrow.length < tomorrowTl.length) Sheets.saveTimeline(State.tomorrow, cleanTomorrow).catch(() => {});
-    State.todayTimeline   = cleanToday;
+    State.todayTimeline    = cleanToday;
     State.tomorrowTimeline = cleanTomorrow;
+    Store.set(CONFIG.LS.TL_PREFIX + State.today,    JSON.stringify(cleanToday));
+    Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(cleanTomorrow));
 
     // スプレッドシートに「1 やることリスト」ルーティンが存在するか
     const alreadyHasDefaultRoutines = State.routines.some(r => !r.onetime && r.name === '1 やることリスト');
@@ -533,7 +552,7 @@ async function loadAll() {
           duration: '', active: true, order: nextOrder, onetime: false, presets: [], noteMode: true,
         });
         renumberRoutines(State.routines.filter(r => !r.onetime));
-        Sheets.saveAllRoutines(State.routines).catch(() => {});
+        saveRoutines();
       }
       Store.set(CONFIG.LS.MIGRATED_V8, '1');
     }
@@ -574,10 +593,12 @@ async function loadAll() {
     done();
     try { renderAll(); } catch (re) { console.error('renderAll error in loadAll catch:', re); }
     // 401/認証エラー → 再認証バナーを表示（エラートーストではなく）
-    if (e.isAuthError || e.message === 'AUTH_REQUIRED') {
-      showAuthBanner();
-    } else {
-      showToast('読み込みエラー: ' + (e.message || e) + ' — 同期ボタン🔄で再試行', 'error');
+    if (!silent) {
+      if (e.isAuthError || e.message === 'AUTH_REQUIRED') {
+        showAuthBanner();
+      } else {
+        showToast('読み込みエラー: ' + (e.message || e) + ' — 同期ボタン🔄で再試行', 'error');
+      }
     }
   }
 }
@@ -590,38 +611,39 @@ async function navigateDates(delta) {
   State.today    = addDays(State.actualToday, State.dateOffset);
   State.tomorrow = addDays(State.actualToday, State.dateOffset + 1);
 
-  // 表示だけ先に更新
-  State.todayTimeline    = [];
-  State.tomorrowTimeline = [];
+  // ① localStorage から即時読み込み（認証不要）
+  const td = Store.get(CONFIG.LS.TL_PREFIX + State.today);
+  State.todayTimeline    = td ? JSON.parse(td) : [];
+  const tm = Store.get(CONFIG.LS.TL_PREFIX + State.tomorrow);
+  State.tomorrowTimeline = tm ? JSON.parse(tm) : [];
   renderAll();
 
-  // データを再取得
-  try {
-    const [todayTl, tomorrowTl] = await Promise.all([
-      Sheets.getTimeline(State.today),
-      Sheets.getTimeline(State.tomorrow),
-    ]);
-    State.todayTimeline    = todayTl;
-    State.tomorrowTimeline = tomorrowTl;
-
-    // カレンダーも再取得（失敗しても続行）
+  // ② Sheets から最新データをバックグラウンド取得（認証がある場合のみ）
+  if (!Auth.isExpired() && Auth.accessToken) {
     try {
-      const [todayCal, tomorrowCal] = await Promise.all([
-        Calendar.getEvents(State.today),
-        Calendar.getEvents(State.tomorrow),
+      const [todayTl, tomorrowTl] = await Promise.all([
+        Sheets.getTimeline(State.today),
+        Sheets.getTimeline(State.tomorrow),
       ]);
-      State.todayCalEvents    = todayCal;
-      State.tomorrowCalEvents = tomorrowCal;
-      mergeCalEvents(State.todayTimeline,    todayCal);
-      mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
-    } catch (_) {}
+      State.todayTimeline    = todayTl;
+      State.tomorrowTimeline = tomorrowTl;
+      Store.set(CONFIG.LS.TL_PREFIX + State.today,    JSON.stringify(todayTl));
+      Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(tomorrowTl));
 
-    renderAll();
-  } catch (e) {
-    if (e.isAuthError || e.message === 'AUTH_REQUIRED') {
-      showAuthBanner();
-    } else {
-      showToast('読み込みエラー: ' + e.message, 'error');
+      try {
+        const [todayCal, tomorrowCal] = await Promise.all([
+          Calendar.getEvents(State.today),
+          Calendar.getEvents(State.tomorrow),
+        ]);
+        State.todayCalEvents    = todayCal;
+        State.tomorrowCalEvents = tomorrowCal;
+        mergeCalEvents(State.todayTimeline,    todayCal);
+        mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+      } catch (_) {}
+
+      renderAll();
+    } catch (_) {
+      // 認証エラーでもバナーは出さない（既にlocal表示済み）
     }
   }
 }
@@ -1070,11 +1092,37 @@ function onPanelCardDrop(e) {
 
   State.dragging = null;
   renderAll();
-  Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
+  saveRoutines();
 }
 
 // ============================================================
-// 保存（デバウンス: 1.5秒後）
+// ローカルストレージ ヘルパー
+// ============================================================
+
+// localStorage からルーティン・タイムラインを読み込む（認証不要）
+function loadFromLocal() {
+  const raw = Store.get(CONFIG.LS.ROUTINES);
+  if (!raw) return false;
+  try {
+    State.routines = JSON.parse(raw);
+    const td = Store.get(CONFIG.LS.TL_PREFIX + State.today);
+    State.todayTimeline    = td ? JSON.parse(td) : [];
+    const tm = Store.get(CONFIG.LS.TL_PREFIX + State.tomorrow);
+    State.tomorrowTimeline = tm ? JSON.parse(tm) : [];
+    return true;
+  } catch { return false; }
+}
+
+// ルーティンを localStorage に即時保存し、Sheets にはこっそり試みる
+function saveRoutines() {
+  Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
+  if (!Auth.isExpired() && Auth.accessToken) {
+    Sheets.saveAllRoutines(State.routines).catch(() => {});
+  }
+}
+
+// ============================================================
+// 保存（デバウンス）
 // ============================================================
 const _saveTimers = {};
 
@@ -1085,26 +1133,31 @@ const _saveTimers = {};
 // ============================================================
 function flushActiveTimelines({ keepalive = false } = {}) {
   const dates = Object.keys(_saveTimers).filter(d => _saveTimers[d]);
-  if (dates.length === 0) return;
   dates.forEach(date => {
     clearTimeout(_saveTimers[date]);
     delete _saveTimers[date];
-    const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
-    Sheets.saveTimelineKeepalive(date, tl, keepalive).catch(e => handleSaveError(e, 'timeline', date));
+    // localStorage は scheduleSave で既に保存済み
+    if (!Auth.isExpired() && Auth.accessToken) {
+      const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+      Sheets.saveTimelineKeepalive(date, tl, keepalive).catch(() => {});
+    }
   });
 }
 
 function scheduleSave(date) {
+  // ① localStorage に即時保存（認証不要）
+  const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+  Store.set(CONFIG.LS.TL_PREFIX + date, JSON.stringify(tl));
+
+  // ② Sheets にはこっそり非同期保存（失敗しても無視）
   if (_saveTimers[date]) clearTimeout(_saveTimers[date]);
-  _saveTimers[date] = setTimeout(async () => {
-    delete _saveTimers[date];
-    const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
-    try {
-      await Sheets.saveTimeline(date, tl);
-    } catch (e) {
-      handleSaveError(e, 'timeline', date);
-    }
-  }, 800);
+  if (!Auth.isExpired() && Auth.accessToken) {
+    _saveTimers[date] = setTimeout(async () => {
+      delete _saveTimers[date];
+      const tl2 = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
+      Sheets.saveTimeline(date, tl2).catch(() => {});
+    }, 800);
+  }
 }
 
 // ============================================================
@@ -1227,12 +1280,8 @@ async function reorderRoutineSettings(fromId, toId) {
 
   renderRoutineSettings();
   renderRoutinesPanel();
-  try {
-    await Sheets.saveAllRoutines(State.routines);
-    showToast('並び順を保存しました ✅');
-  } catch (e) {
-    handleSaveError(e, 'routines');
-  }
+  saveRoutines();
+  showToast('並び順を保存しました ✅');
 }
 
 // ============================================================
@@ -1329,7 +1378,7 @@ function renderRoutineSettings() {
       if (!r) return;
       r.noteMode = el.checked;
       renderAll();
-      Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
+      saveRoutines();
     });
   });
   container.querySelectorAll('.routine-toggle').forEach(el => {
@@ -1403,7 +1452,7 @@ function deletePresetItem(routineId, idx) {
   r.presets.splice(idx, 1);
   renderRoutineSettings();
   renderRoutinesPanel();
-  Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
+  saveRoutines();
 }
 
 function addPresetItemById(routineId, value, inputEl) {
@@ -1415,17 +1464,16 @@ function addPresetItemById(routineId, value, inputEl) {
   if (inputEl) inputEl.value = '';
   renderRoutineSettings();
   renderRoutinesPanel();
-  Sheets.saveAllRoutines(State.routines).catch(e => handleSaveError(e, 'routines'));
+  saveRoutines();
   showToast('項目を追加しました ✅');
 }
 
-async function toggleRoutineActive(routineId, active) {
+function toggleRoutineActive(routineId, active) {
   const r = State.routines.find(r => r.id === routineId);
   if (!r) return;
   r.active = active;
   renderAll();
-  try { await Sheets.saveAllRoutines(State.routines); }
-  catch (e) { handleSaveError(e, 'routines'); }
+  saveRoutines();
 }
 
 function openAddRoutine(isOnetime = false) {
@@ -1463,24 +1511,16 @@ async function saveRoutine() {
 
   closeModal('routineModal');
   renderAll();
-  try {
-    await Sheets.saveAllRoutines(State.routines);
-    showToast('保存しました ✅');
-  } catch (e) {
-    handleSaveError(e, 'routines');
-  }
+  saveRoutines();
+  showToast('保存しました ✅');
 }
 
-async function deleteRoutine(routineId) {
+function deleteRoutine(routineId) {
   if (!confirm('このルーティンを削除しますか？')) return;
   State.routines = State.routines.filter(r => r.id !== routineId);
   renderAll();
-  try {
-    await Sheets.saveAllRoutines(State.routines);
-    showToast('削除しました');
-  } catch (e) {
-    handleSaveError(e, 'routines');
-  }
+  saveRoutines();
+  showToast('削除しました');
 }
 
 // ============================================================
@@ -1626,7 +1666,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // 同期
-  document.getElementById('btnSync').addEventListener('click', loadAll);
+  document.getElementById('btnSync').addEventListener('click', async () => {
+    // 認証切れなら先にサインインしてから同期
+    if (Auth.isExpired()) {
+      await new Promise((resolve, reject) => {
+        Auth.signIn(resolve, reject, { forceSelect: true });
+      }).catch(() => {
+        showToast('サインインが必要です', 'error');
+        return;
+      });
+    }
+    loadAll();
+  });
 
   // 再認証バナーのサインインボタン
   document.getElementById('btnReAuth').addEventListener('click', () => {
