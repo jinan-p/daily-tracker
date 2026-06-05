@@ -387,8 +387,13 @@ async function launchApp() {
       .then(() => {
         Sheets.ensureTimelineSheet().catch(() => {});
         loadAll({ silent: true }).catch(() => {});
+        // loadAll が失敗してもウィジェットだけは試みる
+        loadWeekCalWidget().catch(() => {});
       })
-      .catch(() => {}); // Safari ITP 等でサイレント失敗しても無視
+      .catch(() => {
+        // サイレント認証失敗でもウィジェットは試みる（既存トークンがあれば表示できる）
+        loadWeekCalWidget().catch(() => {});
+      });
     return;
   }
 
