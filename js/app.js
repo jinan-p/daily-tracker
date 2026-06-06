@@ -54,9 +54,9 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-function tomorrowStr() {
+function yesterdayStr() {
   const d = new Date();
-  d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
@@ -373,7 +373,7 @@ async function launchApp() {
   State.actualToday = todayStr();
   State.dateOffset  = 0;
   State.today    = State.actualToday;
-  State.tomorrow = tomorrowStr();
+  State.tomorrow = yesterdayStr();
 
   loadMemo();
   renderAll();
@@ -614,7 +614,7 @@ async function loadAll({ silent = false } = {}) {
 async function navigateDates(delta) {
   State.dateOffset  += delta;
   State.today    = addDays(State.actualToday, State.dateOffset);
-  State.tomorrow = addDays(State.actualToday, State.dateOffset + 1);
+  State.tomorrow = addDays(State.actualToday, State.dateOffset - 1);
 
   // ① localStorage から即時読み込み（認証不要）
   const td = Store.get(CONFIG.LS.TL_PREFIX + State.today);
@@ -818,11 +818,12 @@ function renderTimeline(containerId, timeline, date) {
   if (containerId === 'todayTimeline') {
     const tomorrowLabel = colLabel(State.tomorrow, State.actualToday).split(' ')[0];
     document.getElementById('dateNavRange').textContent =
-      `${formatDateJP(State.today)} 〜 ${formatDateJP(State.tomorrow)}`;
+      `${formatDateJP(State.tomorrow)} 〜 ${formatDateJP(State.today)}`;
   }
 
   // 過去の日付は読み取り専用（actualToday より前）
-  const isPast = date < State.actualToday;
+  // 昨日（右列）は編集可能にするため、一昨日以前のみ読み取り専用
+  const isPast = date < addDays(State.actualToday, -1);
   const colBody = container.parentElement;
   colBody.classList.toggle('tl-readonly', isPast);
 
