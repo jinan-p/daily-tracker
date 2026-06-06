@@ -167,6 +167,9 @@ async function loadWeekCalWidget() {
     widget.classList.remove('hidden');
   } catch (e) {
     console.warn('週カレンダー取得失敗:', e);
+    // 認証切れでも widget は表示し、🔄 を促すメッセージを出す
+    list.innerHTML = '<div class="week-cal-no-auth">🔐 🔄 で同期すると表示されます</div>';
+    widget.classList.remove('hidden');
   }
 }
 
@@ -382,18 +385,15 @@ async function launchApp() {
     renderAll();
     renderRoutinesPanel();
     renderRoutineSettings();
+    // ウィジェットは必ず起動（認証がなければ「🔄で表示」メッセージを出す）
+    loadWeekCalWidget();
     // バックグラウンドで Sheets・Calendar を同期（失敗しても無視）
     Auth.silentSignIn()
       .then(() => {
         Sheets.ensureTimelineSheet().catch(() => {});
         loadAll({ silent: true }).catch(() => {});
-        // loadAll が失敗してもウィジェットだけは試みる
-        loadWeekCalWidget().catch(() => {});
       })
-      .catch(() => {
-        // サイレント認証失敗でもウィジェットは試みる（既存トークンがあれば表示できる）
-        loadWeekCalWidget().catch(() => {});
-      });
+      .catch(() => {});
     return;
   }
 
