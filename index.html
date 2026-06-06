@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Daily Tracker</title>
-  <link rel="stylesheet" href="css/style.css?v=20260507i">
+  <link rel="stylesheet" href="css/style.css?v=20260507j">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -137,16 +137,16 @@
           <div class="panel-hint">↑ タイムラインへドラッグ</div>
         </div>
 
-        <!-- 左列タイムライン -->
-        <div class="timeline-col-wrap">
-          <div class="timeline-col-header" id="todayLabel">今日</div>
-          <div id="todayTimeline" class="timeline-col-body"></div>
-        </div>
-
-        <!-- 右列タイムライン -->
+        <!-- 左列タイムライン（昨日） -->
         <div class="timeline-col-wrap">
           <div class="timeline-col-header" id="tomorrowLabel">昨日</div>
           <div id="tomorrowTimeline" class="timeline-col-body"></div>
+        </div>
+
+        <!-- 右列タイムライン（今日） -->
+        <div class="timeline-col-wrap">
+          <div class="timeline-col-header" id="todayLabel">今日</div>
+          <div id="todayTimeline" class="timeline-col-body"></div>
         </div>
 
       </div>
@@ -277,11 +277,11 @@
 <div id="toast" class="toast hidden"></div>
 
 <!-- スクリプト読み込み（?v= でキャッシュ無効化） -->
-<script src="js/config.js?v=20260507i"></script>
-<script src="js/auth.js?v=20260507i"></script>
-<script src="js/sheets.js?v=20260507i"></script>
-<script src="js/calendar.js?v=20260507i"></script>
-<script src="js/app.js?v=20260507i"></script>
+<script src="js/config.js?v=20260507j"></script>
+<script src="js/auth.js?v=20260507j"></script>
+<script src="js/sheets.js?v=20260507j"></script>
+<script src="js/calendar.js?v=20260507j"></script>
+<script src="js/app.js?v=20260507j"></script>
 
 </body>
 </html>
