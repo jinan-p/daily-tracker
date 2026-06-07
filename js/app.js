@@ -387,11 +387,26 @@ async function launchApp() {
     renderRoutineSettings();
     // ウィジェットは必ず起動（認証がなければ「🔄で表示」メッセージを出す）
     loadWeekCalWidget();
-    // バックグラウンドで Sheets・Calendar を同期（失敗しても無視）
+    // バックグラウンドで Calendar のみ取得（Sheetsはfetchしない＝localを上書きしない）
     Auth.silentSignIn()
       .then(() => {
         Sheets.ensureTimelineSheet().catch(() => {});
-        loadAll({ silent: true }).catch(() => {});
+        // ローカルデータをSheetsへアップロード（ダウンロードは行わない）
+        saveRoutines();
+        scheduleSave(State.today);
+        scheduleSave(State.tomorrow);
+        // カレンダーイベントだけ取得してマージ
+        Promise.all([
+          Calendar.getEvents(State.today),
+          Calendar.getEvents(State.tomorrow),
+        ]).then(([todayCal, tomorrowCal]) => {
+          State.todayCalEvents    = todayCal;
+          State.tomorrowCalEvents = tomorrowCal;
+          mergeCalEvents(State.todayTimeline,    todayCal);
+          mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+          renderAll();
+          loadWeekCalWidget();
+        }).catch(() => {});
       })
       .catch(() => {});
     return;
@@ -462,6 +477,17 @@ async function loadAll({ silent = false } = {}) {
     return;
   }
 
+  // 🔄 同期の場合：Sheetsへアップロードしてから取得（ローカルが常に優先）
+  if (!silent) {
+    try {
+      await Promise.all([
+        Sheets.saveAllRoutines(State.routines),
+        Sheets.saveTimeline(State.today,    State.todayTimeline),
+        Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
+      ]);
+    } catch (_) { /* アップロード失敗は無視してfetchを続行 */ }
+  }
+
   try {
     const [routines, todayTl, tomorrowTl] = await Promise.all([
       Sheets.getRoutines(),
@@ -470,7 +496,7 @@ async function loadAll({ silent = false } = {}) {
     ]);
 
     State.routines        = routines;
-    Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines)); // localStorage にも保存
+    Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
 
     // 読み込み後に番号を振り直す（表示順と名前の番号がズレていたら修正して保存）
     {
@@ -499,8 +525,11 @@ async function loadAll({ silent = false } = {}) {
     if (cleanTomorrow.length < tomorrowTl.length) Sheets.saveTimeline(State.tomorrow, cleanTomorrow).catch(() => {});
     State.todayTimeline    = cleanToday;
     State.tomorrowTimeline = cleanTomorrow;
-    Store.set(CONFIG.LS.TL_PREFIX + State.today,    JSON.stringify(cleanToday));
-    Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(cleanTomorrow));
+    // 🔄 同期時のみ localStorage を更新（バックグラウンドでは上書きしない）
+    if (!silent) {
+      Store.set(CONFIG.LS.TL_PREFIX + State.today,    JSON.stringify(cleanToday));
+      Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(cleanTomorrow));
+    }
 
     // スプレッドシートに「1 やることリスト」ルーティンが存在するか
     const alreadyHasDefaultRoutines = State.routines.some(r => !r.onetime && r.name === '1 やることリスト');
@@ -632,8 +661,7 @@ async function navigateDates(delta) {
       ]);
       State.todayTimeline    = todayTl;
       State.tomorrowTimeline = tomorrowTl;
-      Store.set(CONFIG.LS.TL_PREFIX + State.today,    JSON.stringify(todayTl));
-      Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(tomorrowTl));
+      // 表示は更新するが localStorage は上書きしない（ローカルデータを守るため）
 
       try {
         const [todayCal, tomorrowCal] = await Promise.all([
