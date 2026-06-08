@@ -1436,7 +1436,12 @@ function renderRoutineSettings() {
   });
   container.querySelectorAll('.preset-add-input').forEach(input => {
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.isComposing) addPresetItemById(input.dataset.id, input.value.trim(), input);
+      if (e.key === 'Enter' && !e.isComposing) {
+        // 1回目のEnter → 追加ボタンにフォーカスを移す（2回目のEnterで確定）
+        const btn = container.querySelector(`.preset-add-btn[data-id="${input.dataset.id}"]`);
+        if (btn) btn.focus();
+        e.preventDefault();
+      }
     });
   });
 
