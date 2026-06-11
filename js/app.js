@@ -646,34 +646,43 @@ async function navigateDates(delta) {
   State.tomorrow = addDays(State.actualToday, State.dateOffset - 1);
 
   // ① localStorage から即時読み込み（認証不要）
-  const td = Store.get(CONFIG.LS.TL_PREFIX + State.today);
-  State.todayTimeline    = td ? JSON.parse(td) : [];
-  const tm = Store.get(CONFIG.LS.TL_PREFIX + State.tomorrow);
-  State.tomorrowTimeline = tm ? JSON.parse(tm) : [];
+  const tdRaw = Store.get(CONFIG.LS.TL_PREFIX + State.today);
+  const tmRaw = Store.get(CONFIG.LS.TL_PREFIX + State.tomorrow);
+  State.todayTimeline    = tdRaw ? JSON.parse(tdRaw) : [];
+  State.tomorrowTimeline = tmRaw ? JSON.parse(tmRaw) : [];
   renderAll();
 
-  // ② Sheets から最新データをバックグラウンド取得（認証がある場合のみ）
   if (!Auth.isExpired() && Auth.accessToken) {
+    // ② localStorage にデータがない日付だけ Sheets から取得
+    //   （localStorage がある日付は上書きしない＝ローカルデータを守る）
+    const needsToday    = !tdRaw;
+    const needsTomorrow = !tmRaw;
+
     try {
-      const [todayTl, tomorrowTl] = await Promise.all([
-        Sheets.getTimeline(State.today),
-        Sheets.getTimeline(State.tomorrow),
-      ]);
-      State.todayTimeline    = todayTl;
-      State.tomorrowTimeline = tomorrowTl;
-      // 表示は更新するが localStorage は上書きしない（ローカルデータを守るため）
-
-      try {
-        const [todayCal, tomorrowCal] = await Promise.all([
-          Calendar.getEvents(State.today),
-          Calendar.getEvents(State.tomorrow),
+      if (needsToday || needsTomorrow) {
+        const fetches = await Promise.all([
+          needsToday    ? Sheets.getTimeline(State.today)    : Promise.resolve(null),
+          needsTomorrow ? Sheets.getTimeline(State.tomorrow) : Promise.resolve(null),
         ]);
-        State.todayCalEvents    = todayCal;
-        State.tomorrowCalEvents = tomorrowCal;
-        mergeCalEvents(State.todayTimeline,    todayCal);
-        mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
-      } catch (_) {}
+        if (fetches[0]) {
+          State.todayTimeline = fetches[0];
+          Store.set(CONFIG.LS.TL_PREFIX + State.today, JSON.stringify(fetches[0]));
+        }
+        if (fetches[1]) {
+          State.tomorrowTimeline = fetches[1];
+          Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(fetches[1]));
+        }
+      }
 
+      // ③ カレンダーイベントを取得してマージ
+      const [todayCal, tomorrowCal] = await Promise.all([
+        Calendar.getEvents(State.today),
+        Calendar.getEvents(State.tomorrow),
+      ]);
+      State.todayCalEvents    = todayCal;
+      State.tomorrowCalEvents = tomorrowCal;
+      mergeCalEvents(State.todayTimeline,    todayCal);
+      mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
       renderAll();
     } catch (_) {
       // 認証エラーでもバナーは出さない（既にlocal表示済み）
@@ -821,6 +830,8 @@ function onRoutineV2DragStart(e) {
     fromDate: 'unplaced',
   };
   e.dataTransfer.effectAllowed = 'move';
+  // Safari はこの setData がないとドロップを受け付けない
+  e.dataTransfer.setData('text/plain', el.dataset.id);
   setTimeout(() => el.classList.add('dragging'), 0);
 }
 
@@ -842,9 +853,8 @@ function renderTimeline(containerId, timeline, date) {
   document.getElementById(labelId).innerHTML =
     `${colLabel(date, State.actualToday)}<span class="header-score">${scoreText}</span>`;
 
-  // ナビバーの日付範囲テキストを更新（左列のときだけ）
+  // ナビバーの日付範囲テキストを更新（今日列のときだけ）
   if (containerId === 'todayTimeline') {
-    const tomorrowLabel = colLabel(State.tomorrow, State.actualToday).split(' ')[0];
     document.getElementById('dateNavRange').textContent =
       `${formatDateJP(State.tomorrow)} 〜 ${formatDateJP(State.today)}`;
   }
@@ -1015,6 +1025,8 @@ function onItemDragStart(e) {
     fromDate: el.dataset.date,
   };
   e.dataTransfer.effectAllowed = 'move';
+  // Safari はこの setData がないとドロップを受け付けない
+  e.dataTransfer.setData('text/plain', el.dataset.id);
   setTimeout(() => el.classList.add('dragging'), 0);
 }
 
@@ -1257,9 +1269,7 @@ function openManualTaskModal(slot, date) {
   document.getElementById('manualTaskSlot').value  = slot;
   document.getElementById('manualTaskDate').value  = date;
   document.getElementById('manualTaskTitle').value = '';
-  const label = date === State.today
-    ? `今日 ${formatDateJP(State.today)} ${slot}`
-    : `明日 ${formatDateJP(State.tomorrow)} ${slot}`;
+  const label = `${colLabel(date, State.actualToday)} ${slot}`;
   document.getElementById('manualTaskSlotLabel').textContent = label;
   openModal('manualTaskModal');
   setTimeout(() => document.getElementById('manualTaskTitle').focus(), 50);
@@ -1451,6 +1461,8 @@ function renderRoutineSettings() {
       e.stopPropagation();
       _presetDrag = { routineId: tag.dataset.routineId, fromIdx: parseInt(tag.dataset.idx, 10) };
       e.dataTransfer.effectAllowed = 'move';
+      // Safari はこの setData がないとドロップを受け付けない
+      e.dataTransfer.setData('text/plain', tag.dataset.routineId + ':' + tag.dataset.idx);
       setTimeout(() => tag.classList.add('preset-tag-dragging'), 0);
     });
     tag.addEventListener('dragend', () => {
@@ -1545,7 +1557,7 @@ async function saveRoutine() {
     const r = State.routines.find(r => r.id === State.editRoutineId);
     if (r) { r.name = name; r.category = category; }
   } else {
-    State.routines.push({ id: genId(), name, category, duration: '', active: true, order: State.routines.length, onetime: isOnetime, presets: [] });
+    State.routines.push({ id: genId(), name, category, duration: '', active: true, order: State.routines.length, onetime: isOnetime, presets: [], noteMode: false });
   }
 
   closeModal('routineModal');
