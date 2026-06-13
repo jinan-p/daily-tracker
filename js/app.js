@@ -382,6 +382,15 @@ async function launchApp() {
 
   // ローカルデータがあれば即時起動（認証不要・バナーなし）
   if (loadFromLocal()) {
+    // 感想メモ欄つきルーティンのマイグレーション（loadAllを通らない通常起動でも適用）
+    if (!Store.get(CONFIG.LS.MIGRATED_V8)) {
+      addNoteRoutine('動画');
+      Store.set(CONFIG.LS.MIGRATED_V8, '1');
+    }
+    if (!Store.get(CONFIG.LS.MIGRATED_V9)) {
+      addNoteRoutine('読書');
+      Store.set(CONFIG.LS.MIGRATED_V9, '1');
+    }
     renderAll();
     renderRoutinesPanel();
     renderRoutineSettings();
@@ -457,6 +466,26 @@ async function initDefaultRoutines() {
   });
   Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines)); // localStorage にも保存
   await Sheets.saveAllRoutines(State.routines);
+}
+
+// ============================================================
+// 感想メモ欄つきルーティンを追加（既にあれば何もしない）
+// 「動画」「読書」などスケジュールから直接コメントを書くルーティン用
+// ============================================================
+function addNoteRoutine(baseName) {
+  const exists = State.routines.some(
+    r => !r.onetime && r.name.replace(/^\d+\s+/, '') === baseName,
+  );
+  if (exists) return false;
+  const nonOnetime = State.routines.filter(r => !r.onetime);
+  const nextOrder  = nonOnetime.length;
+  State.routines.push({
+    id: genId(), name: `${nextOrder + 1} ${baseName}`, category: 'default',
+    duration: '', active: true, order: nextOrder, onetime: false, presets: [], noteMode: true,
+  });
+  renumberRoutines(State.routines.filter(r => !r.onetime));
+  saveRoutines();
+  return true;
 }
 
 // ============================================================
@@ -577,18 +606,14 @@ async function loadAll({ silent = false } = {}) {
 
     // v8マイグレーション：「動画」ルーティンを追加（noteMode: true）
     if (!Store.get(CONFIG.LS.MIGRATED_V8)) {
-      const alreadyHasDouga = State.routines.some(r => !r.onetime && r.name.replace(/^\d+\s+/, '') === '動画');
-      if (!alreadyHasDouga) {
-        const nonOnetime = State.routines.filter(r => !r.onetime);
-        const nextOrder  = nonOnetime.length;
-        State.routines.push({
-          id: genId(), name: `${nextOrder + 1} 動画`, category: 'default',
-          duration: '', active: true, order: nextOrder, onetime: false, presets: [], noteMode: true,
-        });
-        renumberRoutines(State.routines.filter(r => !r.onetime));
-        saveRoutines();
-      }
+      addNoteRoutine('動画');
       Store.set(CONFIG.LS.MIGRATED_V8, '1');
+    }
+
+    // v9マイグレーション：「読書」ルーティンを追加（noteMode: true）
+    if (!Store.get(CONFIG.LS.MIGRATED_V9)) {
+      addNoteRoutine('読書');
+      Store.set(CONFIG.LS.MIGRATED_V9, '1');
     }
 
     // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持

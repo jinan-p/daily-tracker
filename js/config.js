@@ -38,6 +38,7 @@ const CONFIG = {
     MIGRATED_V6:  'dt_migrated_v6',
     MIGRATED_V7:  'dt_migrated_v7',
     MIGRATED_V8:  'dt_migrated_v8',
+    MIGRATED_V9:  'dt_migrated_v9',
     ROUTINES:     'dt_routines',
     TL_PREFIX:    'dt_tl_',
   },
