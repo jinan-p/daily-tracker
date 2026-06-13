@@ -997,10 +997,11 @@ function renderTlItem(item, date) {
     const _r = State.routines.find(rt => rt.id === item.itemId);
     const routineItems = Array.isArray(_r?.presets) ? _r.presets : [];
     if (_r?.noteMode) {
-      // 感想メモ入力欄
-      titleHtml = `<input type="text" class="tl-note-input"
+      // 感想メモ入力欄（「動画：」「読書：」などのラベル付き）
+      const noteLabel = _r.name.replace(/^\d+\s+/, '');
+      titleHtml = `<span class="tl-note-label">${noteLabel}：</span><input type="text" class="tl-note-input"
         data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}"
-        placeholder="感想を入力…" value="${safe}">`;
+        placeholder="コメントを入力…" value="${safe}">`;
     } else if (routineItems.length > 0) {
       const opts = routineItems.map(i =>
         `<option value="${i.replace(/"/g, '&quot;')}" ${i === item.title ? 'selected' : ''}>${i}</option>`

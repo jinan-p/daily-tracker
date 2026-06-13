@@ -1626,6 +1626,13 @@ body {
 }
 
 /* 感想メモ入力欄（noteMode） */
+.tl-note-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
 .tl-note-input {
   flex: 1;
   font-size: 12px;
