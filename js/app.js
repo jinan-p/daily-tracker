@@ -999,9 +999,14 @@ function renderTlItem(item, date) {
     if (_r?.noteMode) {
       // 感想メモ入力欄（「動画：」「読書：」などのラベル付き）
       const noteLabel = _r.name.replace(/^\d+\s+/, '');
+      // 既存データにルーティン名が混入している場合は除去（編集時に綺麗な値で保存される）
+      const noteVal = (item.title || '')
+        .replace(new RegExp(`\\d+\\s*${noteLabel}`), '') // 「25 動画」などを除去
+        .replace(/^[：:\s]+|[：:\s]+$/g, '')              // 端の「：」や空白を除去
+        .replace(/"/g, '&quot;');
       titleHtml = `<span class="tl-note-label">${noteLabel}：</span><input type="text" class="tl-note-input"
         data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}"
-        placeholder="コメントを入力…" value="${safe}">`;
+        placeholder="コメントを入力…" value="${noteVal}">`;
     } else if (routineItems.length > 0) {
       const opts = routineItems.map(i =>
         `<option value="${i.replace(/"/g, '&quot;')}" ${i === item.title ? 'selected' : ''}>${i}</option>`
@@ -1088,7 +1093,13 @@ function onSlotDrop(e) {
 
   // 新しい位置に追加
   const targetTl = toDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
-  targetTl.push({ itemType, itemId, timeSlot: toSlot, title, score: null });
+  // 感想メモ欄つきルーティンは、入力欄をコメント専用にするためタイトルを空で配置
+  let placedTitle = title;
+  if (itemType === 'routine') {
+    const dr = State.routines.find(rt => rt.id === itemId);
+    if (dr?.noteMode) placedTitle = '';
+  }
+  targetTl.push({ itemType, itemId, timeSlot: toSlot, title: placedTitle, score: null });
 
   // ルーティンパネルからのドロップなら選択を次の項目へ進める
   if (fromDate === 'unplaced' && itemType === 'routine') {
