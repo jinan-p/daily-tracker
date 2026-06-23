@@ -1257,6 +1257,7 @@ function openScorePicker(itemId, slot, date, anchorEl) {
   const picker = document.createElement('div');
   picker.id = 'scorePicker';
   picker.className = 'score-picker';
+  const hasScore = item.score !== null && item.score !== undefined;
   picker.innerHTML = `
     <div class="score-picker-label">点数を選択（0〜5点）</div>
     <div class="score-picker-btns">
@@ -1264,6 +1265,7 @@ function openScorePicker(itemId, slot, date, anchorEl) {
         <button class="score-btn ${item.score === n ? 'selected' : ''}" data-score="${n}">${n}</button>
       `).join('')}
     </div>
+    ${hasScore ? '<button class="score-clear-btn">点数を消す</button>' : ''}
   `;
 
   picker.querySelectorAll('.score-btn').forEach(btn => {
@@ -1276,6 +1278,17 @@ function openScorePicker(itemId, slot, date, anchorEl) {
       closeScorePicker();
     });
   });
+
+  const clearBtn = picker.querySelector('.score-clear-btn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      item.score = null;
+      renderAll();
+      scheduleSave(date);
+      closeScorePicker();
+    });
+  }
 
   // アンカー要素の直下に配置
   const rect = anchorEl.getBoundingClientRect();

@@ -1834,6 +1834,26 @@ body {
   color: #fff;
 }
 
+.score-clear-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text-muted, #888);
+  transition: all 0.15s;
+}
+.score-clear-btn:hover {
+  border-color: #e05555;
+  color: #e05555;
+}
+
 /* ============================================================
    手動タスクモーダル
    ============================================================ */

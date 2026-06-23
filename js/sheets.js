@@ -324,10 +324,19 @@ const Sheets = {
       }));
   },
 
+  // タイムライン1行は必ず6列（A:F）。末尾の空セルを補って書き込まないと、
+  // Google Sheets は省略した列を上書きせず、前の行に残っていた点数が
+  // 別タスクに紛れ込む（＝勝手に点数が入る）バグの原因になる。
+  _padTimelineRow(r) {
+    const row = r.slice(0, 6);
+    while (row.length < 6) row.push('');
+    return row;
+  },
+
   async saveTimeline(date, items) {
     const all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
     const oldCount = all.length;
-    const others = all.filter(r => r[0] !== date);
+    const others = all.filter(r => r[0] !== date).map(r => this._padTimelineRow(r));
     const dateRows = items.map(item => [
       date, item.itemType, item.itemId, item.timeSlot, item.title,
       item.score !== null && item.score !== undefined ? item.score : '',
@@ -358,7 +367,7 @@ const Sheets = {
     if (!this._timelineCache) {
       return this.saveTimeline(date, items);
     }
-    const others = this._timelineCache.filter(r => r[0] !== date);
+    const others = this._timelineCache.filter(r => r[0] !== date).map(r => this._padTimelineRow(r));
     const dateRows = items.map(item => [
       date, item.itemType, item.itemId, item.timeSlot, item.title,
       item.score !== null && item.score !== undefined ? item.score : '',
