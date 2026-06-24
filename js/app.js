@@ -345,8 +345,9 @@ async function flushPendingSaves() {
   State._pendingSaves = { timelines: {}, routines: false };
 
   const jobs = [];
-  for (const [date, items] of Object.entries(timelines)) {
-    jobs.push(Sheets.saveTimeline(date, items).catch(e => console.warn('flush timeline error:', e)));
+  if (Object.keys(timelines).length > 0) {
+    // 複数日まとめて1回で保存（並列保存だと後勝ちで巻き戻るため）
+    jobs.push(Sheets.saveTimelines(timelines).catch(e => console.warn('flush timeline error:', e)));
   }
   if (routines) {
     jobs.push(Sheets.saveAllRoutines(State.routines).catch(e => console.warn('flush routines error:', e)));
@@ -507,12 +508,15 @@ async function loadAll({ silent = false } = {}) {
   }
 
   // 🔄 同期の場合：Sheetsへアップロードしてから取得（ローカルが常に優先）
+  // タイムラインは2日分まとめて1回で保存（並列保存だと後勝ちで点数が巻き戻る）
   if (!silent) {
     try {
       await Promise.all([
         Sheets.saveAllRoutines(State.routines),
-        Sheets.saveTimeline(State.today,    State.todayTimeline),
-        Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
+        Sheets.saveTimelines({
+          [State.today]:    State.todayTimeline,
+          [State.tomorrow]: State.tomorrowTimeline,
+        }),
       ]);
     } catch (_) { /* アップロード失敗は無視してfetchを続行 */ }
   }
@@ -539,19 +543,27 @@ async function loadAll({ silent = false } = {}) {
     }
 
     // 重複排除（シートに同一行が複数ある場合に自動クリーンアップ）
+    // 重複時は点数のある行を優先して残す（点数が消えないように）
     const dedupTl = (tl) => {
-      const seen = new Set();
-      return tl.filter(i => {
+      const map = new Map();
+      const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
+      for (const i of tl) {
         const key = `${i.itemType}|${i.itemId}|${i.timeSlot}|${i.title}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+        const existing = map.get(key);
+        if (!existing) { map.set(key, i); continue; }
+        // 既存に点数が無く、新しい方に点数があれば差し替え
+        if (!hasScore(existing) && hasScore(i)) map.set(key, i);
+      }
+      return [...map.values()];
     };
     const cleanToday    = dedupTl(todayTl);
     const cleanTomorrow = dedupTl(tomorrowTl);
-    if (cleanToday.length    < todayTl.length)    Sheets.saveTimeline(State.today,    cleanToday).catch(() => {});
-    if (cleanTomorrow.length < tomorrowTl.length) Sheets.saveTimeline(State.tomorrow, cleanTomorrow).catch(() => {});
+    if (cleanToday.length < todayTl.length || cleanTomorrow.length < tomorrowTl.length) {
+      Sheets.saveTimelines({
+        [State.today]:    cleanToday,
+        [State.tomorrow]: cleanTomorrow,
+      }).catch(() => {});
+    }
     State.todayTimeline    = cleanToday;
     State.tomorrowTimeline = cleanTomorrow;
     // 🔄 同期時のみ localStorage を更新（バックグラウンドでは上書きしない）
@@ -570,10 +582,10 @@ async function loadAll({ silent = false } = {}) {
         await initDefaultRoutines();
         State.todayTimeline    = State.todayTimeline.filter(i => i.itemType === 'calendar');
         State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType === 'calendar');
-        await Promise.all([
-          Sheets.saveTimeline(State.today,    State.todayTimeline),
-          Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
-        ]).catch(() => {});
+        await Sheets.saveTimelines({
+          [State.today]:    State.todayTimeline,
+          [State.tomorrow]: State.tomorrowTimeline,
+        }).catch(() => {});
       }
       Store.set('dt_migrated_v3', '1');
     }
@@ -586,10 +598,10 @@ async function loadAll({ silent = false } = {}) {
         const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
         State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
         State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
-        await Promise.all([
-          Sheets.saveTimeline(State.today,    State.todayTimeline),
-          Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline),
-        ]).catch(() => {});
+        await Sheets.saveTimelines({
+          [State.today]:    State.todayTimeline,
+          [State.tomorrow]: State.tomorrowTimeline,
+        }).catch(() => {});
       }
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
@@ -625,8 +637,12 @@ async function loadAll({ silent = false } = {}) {
     const tomorrowCleaned = State.tomorrowTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId) && !hasScore(i));
     State.todayTimeline    = cleanTimeline(State.todayTimeline);
     State.tomorrowTimeline = cleanTimeline(State.tomorrowTimeline);
-    if (todayCleaned)    await Sheets.saveTimeline(State.today,    State.todayTimeline).catch(() => {});
-    if (tomorrowCleaned) await Sheets.saveTimeline(State.tomorrow, State.tomorrowTimeline).catch(() => {});
+    if (todayCleaned || tomorrowCleaned) {
+      await Sheets.saveTimelines({
+        [State.today]:    State.todayTimeline,
+        [State.tomorrow]: State.tomorrowTimeline,
+      }).catch(() => {});
+    }
 
     // カレンダーを自動取得（失敗しても続行）
     try {
@@ -1207,7 +1223,18 @@ function saveRoutines() {
 // ============================================================
 // 保存（デバウンス）
 // ============================================================
-const _saveTimers = {};
+let _sheetsSaveTimer = null;
+
+// 表示中の2日分（今日・昨日）をまとめて1回でSheetsへ保存する。
+// 日付ごとに別々の保存を走らせると、後勝ちで点数などが巻き戻るため
+// 必ずまとめて書く（saveTimelines がシート全体を1回で読み書きする）。
+function _saveBothToSheets({ keepalive = false } = {}) {
+  if (Auth.isExpired() || !Auth.accessToken) return;
+  Sheets.saveTimelines({
+    [State.today]:    State.todayTimeline,
+    [State.tomorrow]: State.tomorrowTimeline,
+  }, { keepalive }).catch(() => {});
+}
 
 // ============================================================
 // バックグラウンド移行時の即時保存フラッシュ
@@ -1215,16 +1242,9 @@ const _saveTimers = {};
 // keepalive:true でページが閉じられても送信を完了させる
 // ============================================================
 function flushActiveTimelines({ keepalive = false } = {}) {
-  const dates = Object.keys(_saveTimers).filter(d => _saveTimers[d]);
-  dates.forEach(date => {
-    clearTimeout(_saveTimers[date]);
-    delete _saveTimers[date];
-    // localStorage は scheduleSave で既に保存済み
-    if (!Auth.isExpired() && Auth.accessToken) {
-      const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
-      Sheets.saveTimelineKeepalive(date, tl, keepalive).catch(() => {});
-    }
-  });
+  if (_sheetsSaveTimer) { clearTimeout(_sheetsSaveTimer); _sheetsSaveTimer = null; }
+  // localStorage は scheduleSave で既に保存済み
+  _saveBothToSheets({ keepalive });
 }
 
 function scheduleSave(date) {
@@ -1232,13 +1252,12 @@ function scheduleSave(date) {
   const tl = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
   Store.set(CONFIG.LS.TL_PREFIX + date, JSON.stringify(tl));
 
-  // ② Sheets にはこっそり非同期保存（失敗しても無視）
-  if (_saveTimers[date]) clearTimeout(_saveTimers[date]);
+  // ② Sheets には2日分まとめてこっそり非同期保存（失敗しても無視）
+  if (_sheetsSaveTimer) clearTimeout(_sheetsSaveTimer);
   if (!Auth.isExpired() && Auth.accessToken) {
-    _saveTimers[date] = setTimeout(async () => {
-      delete _saveTimers[date];
-      const tl2 = date === State.today ? State.todayTimeline : State.tomorrowTimeline;
-      Sheets.saveTimeline(date, tl2).catch(() => {});
+    _sheetsSaveTimer = setTimeout(() => {
+      _sheetsSaveTimer = null;
+      _saveBothToSheets();
     }, 800);
   }
 }

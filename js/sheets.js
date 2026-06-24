@@ -380,6 +380,51 @@ const Sheets = {
     // keepalive 時は余剰行クリアをスキップ（次回 loadAll で整合）
   },
 
+  // ------------------------------------------------------------
+  // 複数日をまとめて1回で保存（読み→書きを1回にして競合を防ぐ）
+  // saveTimeline を日付ごとに並列で呼ぶと、各呼び出しがシート全体を
+  // 読み直して書き戻すため、後勝ちで他日付の更新（点数など）が
+  // 巻き戻ってしまう。まとめて書くことでこのレースを根絶する。
+  // keepalive:true のときはキャッシュを使い READ を省略（ページ終了時用）。
+  // ------------------------------------------------------------
+  async saveTimelines(map, { keepalive = false } = {}) {
+    const dates = Object.keys(map);
+    if (dates.length === 0) return;
+
+    let all;
+    if (keepalive && this._timelineCache) {
+      all = this._timelineCache;
+    } else {
+      all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
+    }
+    const oldCount = all.length;
+
+    const dateSet = new Set(dates);
+    const others  = all.filter(r => !dateSet.has(r[0])).map(r => this._padTimelineRow(r));
+
+    const newRows = [];
+    for (const date of dates) {
+      for (const item of (map[date] || [])) {
+        newRows.push([
+          date, item.itemType, item.itemId, item.timeSlot, item.title,
+          item.score !== null && item.score !== undefined ? item.score : '',
+        ]);
+      }
+    }
+    const newAll = [...others, ...newRows];
+    this._timelineCache = newAll;
+
+    if (newAll.length > 0) {
+      await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll, { keepalive });
+    }
+    // 行数が減った場合のみ余剰行をクリア（keepalive 時はスキップ）
+    if (!keepalive && oldCount > newAll.length) {
+      const startRow = newAll.length + 2;
+      const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(`${CONFIG.SHEET.TIMELINE}!A${startRow}:F${oldCount + 1}`)}:clear`;
+      await this._req(clearUrl, { method: 'POST', body: '{}' }).catch(() => {});
+    }
+  },
+
   // ============================================================
   // 採点履歴（Timelineシートからスコアを集計）
   // ============================================================
