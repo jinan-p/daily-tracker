@@ -333,52 +333,13 @@ const Sheets = {
     return row;
   },
 
+  // 1日分の保存は複数日保存の特例として扱う（競合しない単一の読み書きに統一）
   async saveTimeline(date, items) {
-    const all = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
-    const oldCount = all.length;
-    const others = all.filter(r => r[0] !== date).map(r => this._padTimelineRow(r));
-    const dateRows = items.map(item => [
-      date, item.itemType, item.itemId, item.timeSlot, item.title,
-      item.score !== null && item.score !== undefined ? item.score : '',
-    ]);
-    const newAll = [...others, ...dateRows];
-
-    // ① 先に書き込む（消去前に書くことで電源断によるデータ消失を防ぐ）
-    if (newAll.length > 0) {
-      await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll);
-    }
-    this._timelineCache = newAll; // keepalive 保存用キャッシュを更新
-    // ② 行数が減った場合のみ余剰行を後からクリア
-    if (oldCount > newAll.length) {
-      const startRow = newAll.length + 2;
-      const clearUrl = `${CONFIG.SHEETS_BASE}/${this.sheetId}/values/${encodeURIComponent(`${CONFIG.SHEET.TIMELINE}!A${startRow}:F${oldCount + 1}`)}:clear`;
-      await this._req(clearUrl, { method: 'POST', body: '{}' }).catch(() => {});
-    }
+    return this.saveTimelines({ [date]: items });
   },
 
   // タイムラインシートの最終読み込みキャッシュ（keepalive保存でネットワーク読み取りを省略するため）
   _timelineCache: null,
-
-  // バックグラウンド移行時に keepalive:true で即時保存するバリアント
-  // キャッシュを使うことで READ を省略し、他日付データを壊さない
-  async saveTimelineKeepalive(date, items, keepalive = true) {
-    if (!items || items.length === 0) return;
-    // キャッシュがない場合は通常保存にフォールバック（ページ終了時でなければ問題ない）
-    if (!this._timelineCache) {
-      return this.saveTimeline(date, items);
-    }
-    const others = this._timelineCache.filter(r => r[0] !== date).map(r => this._padTimelineRow(r));
-    const dateRows = items.map(item => [
-      date, item.itemType, item.itemId, item.timeSlot, item.title,
-      item.score !== null && item.score !== undefined ? item.score : '',
-    ]);
-    const newAll = [...others, ...dateRows];
-    this._timelineCache = newAll; // キャッシュを更新
-    if (newAll.length > 0) {
-      await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll, { keepalive });
-    }
-    // keepalive 時は余剰行クリアをスキップ（次回 loadAll で整合）
-  },
 
   // ------------------------------------------------------------
   // 複数日をまとめて1回で保存（読み→書きを1回にして競合を防ぐ）

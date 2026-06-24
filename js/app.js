@@ -106,6 +106,21 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// HTML特殊文字をエスケープ（名前やコメントに < & " などが入っても崩れない）
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// 正規表現の特殊文字をエスケープ（ルーティン名を正規表現に使う際の安全策）
+function escapeRegExp(s) {
+  return String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // プリセットはルーティンオブジェクト（r.presets）に直接保存するため
 // loadPresets/savePresets はレガシー互換のため残すが内部では使わない
 function loadPresets() { return {}; }
@@ -775,14 +790,14 @@ function renderRoutinesPanel() {
       return;
     }
     container.innerHTML = items.map(r => {
-      const safeTitle = r.name.replace(/"/g, '&quot;');
+      const safeTitle = escapeHtml(r.name);
       return `
         <div class="routine-card onetime-card" draggable="true"
              data-type="onetime" data-id="${r.id}"
              data-slot="unplaced" data-date="unplaced"
              data-title="${safeTitle}">
           <span class="routine-card-icon">⚡</span>
-          <span class="routine-card-name">${r.name}</span>
+          <span class="routine-card-name">${safeTitle}</span>
         </div>`;
     }).join('');
     container.querySelectorAll('.routine-card').forEach(el => {
@@ -810,26 +825,26 @@ function renderRoutinesPanel() {
       // プルダウン付きカード（「1 やることリスト」など）
       const currentIdx = State.routineSelections[r.id] ?? 0;
       const options = items.length > 0
-        ? items.map((item, idx) => `<option value="${item.replace(/"/g, '&quot;')}" ${idx === currentIdx ? 'selected' : ''}>${item}</option>`).join('')
+        ? items.map((item, idx) => `<option value="${escapeHtml(item)}" ${idx === currentIdx ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')
         : '<option value="">（項目なし）</option>';
       return `
         <div class="routine-card routine-card-v2" draggable="true"
              data-type="routine" data-id="${r.id}"
              data-slot="unplaced" data-date="unplaced">
           <div class="routine-card-top">
-            <span class="routine-card-name">${r.name}</span>
+            <span class="routine-card-name">${escapeHtml(r.name)}</span>
           </div>
           <select class="routine-card-select">${options}</select>
         </div>`;
     } else {
       // シンプルカード（プルダウンなし）
-      const safeTitle = r.name.replace(/"/g, '&quot;');
+      const safeTitle = escapeHtml(r.name);
       return `
         <div class="routine-card" draggable="true"
              data-type="routine" data-id="${r.id}"
              data-slot="unplaced" data-date="unplaced"
              data-title="${safeTitle}">
-          <span class="routine-card-name">${r.name}</span>
+          <span class="routine-card-name">${safeTitle}</span>
         </div>`;
     }
   }).join('');
@@ -1003,7 +1018,7 @@ function renderTlItem(item, date) {
   } else {
     icon = getRoutineIcon(item.itemId); cls = 'tl-routine';
   }
-  const safe = item.title.replace(/"/g, '&quot;');
+  const safe = escapeHtml(item.title);
   const scoreLabel = item.score !== null && item.score !== undefined
     ? `<span class="tl-score-badge">${item.score}点</span>`
     : `<span class="tl-score-badge empty">採点</span>`;
@@ -1016,23 +1031,22 @@ function renderTlItem(item, date) {
       // 感想メモ入力欄（「動画：」「読書：」などのラベル付き）
       const noteLabel = _r.name.replace(/^\d+\s+/, '');
       // 既存データにルーティン名が混入している場合は除去（編集時に綺麗な値で保存される）
-      const noteVal = (item.title || '')
-        .replace(new RegExp(`\\d+\\s*${noteLabel}`), '') // 「25 動画」などを除去
-        .replace(/^[：:\s]+|[：:\s]+$/g, '')              // 端の「：」や空白を除去
-        .replace(/"/g, '&quot;');
-      titleHtml = `<span class="tl-note-label">${noteLabel}：</span><input type="text" class="tl-note-input"
+      const noteVal = escapeHtml((item.title || '')
+        .replace(new RegExp(`\\d+\\s*${escapeRegExp(noteLabel)}`), '') // 「25 動画」などを除去
+        .replace(/^[：:\s]+|[：:\s]+$/g, ''));                          // 端の「：」や空白を除去
+      titleHtml = `<span class="tl-note-label">${escapeHtml(noteLabel)}：</span><input type="text" class="tl-note-input"
         data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}"
         placeholder="コメントを入力…" value="${noteVal}">`;
     } else if (routineItems.length > 0) {
       const opts = routineItems.map(i =>
-        `<option value="${i.replace(/"/g, '&quot;')}" ${i === item.title ? 'selected' : ''}>${i}</option>`
+        `<option value="${escapeHtml(i)}" ${i === item.title ? 'selected' : ''}>${escapeHtml(i)}</option>`
       ).join('');
       titleHtml = `<select class="tl-item-select" data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}">${opts}</select>`;
     } else {
-      titleHtml = `<span class="tl-item-name">${item.title}</span>`;
+      titleHtml = `<span class="tl-item-name">${safe}</span>`;
     }
   } else {
-    titleHtml = `<span class="tl-item-name">${item.title}</span>`;
+    titleHtml = `<span class="tl-item-name">${safe}</span>`;
   }
 
   return `
@@ -1413,14 +1427,14 @@ function renderRoutineSettings() {
     const tagsHtml = items.map((item, idx) => `
       <span class="preset-tag" draggable="true" data-routine-id="${r.id}" data-idx="${idx}">
         <span class="preset-tag-handle">⠿</span>
-        ${item}
+        ${escapeHtml(item)}
         <button class="preset-tag-del" data-id="${r.id}" data-idx="${idx}">✕</button>
       </span>`).join('');
     return `
       <div class="routine-setting-item ${r.active ? '' : 'inactive'}" draggable="true" data-id="${r.id}">
         <div class="routine-setting-header">
           <span class="routine-drag-handle" title="ドラッグで並び替え">⠿</span>
-          <span class="routine-setting-name">${r.name}</span>
+          <span class="routine-setting-name">${escapeHtml(r.name)}</span>
           <div class="routine-setting-actions">
             <label class="note-mode-label" title="感想メモ欄をタイムラインに表示する">
               <input type="checkbox" ${r.noteMode ? 'checked' : ''} data-id="${r.id}" class="note-mode-toggle">
