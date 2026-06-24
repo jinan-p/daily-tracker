@@ -427,8 +427,10 @@ async function launchApp() {
         ]).then(([todayCal, tomorrowCal]) => {
           State.todayCalEvents    = todayCal;
           State.tomorrowCalEvents = tomorrowCal;
-          mergeCalEvents(State.todayTimeline,    todayCal);
-          mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+          const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
+          const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
+          if (c1) scheduleSave(State.today);
+          if (c2) scheduleSave(State.tomorrow);
           renderAll();
           loadWeekCalWidget();
         }).catch(() => {});
@@ -667,8 +669,10 @@ async function loadAll({ silent = false } = {}) {
       ]);
       State.todayCalEvents    = todayCal;
       State.tomorrowCalEvents = tomorrowCal;
-      mergeCalEvents(State.todayTimeline,    todayCal);
-      mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+      const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
+      const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
+      if (c1) scheduleSave(State.today);
+      if (c2) scheduleSave(State.tomorrow);
     } catch (calErr) {
       console.warn('カレンダー取得エラー:', calErr);
       showToast('カレンダー取得失敗: ' + calErr.message, 'error');
@@ -730,15 +734,17 @@ async function navigateDates(delta) {
         }
       }
 
-      // ③ カレンダーイベントを取得してマージ
+      // ③ カレンダーイベントを取得して反映
       const [todayCal, tomorrowCal] = await Promise.all([
         Calendar.getEvents(State.today),
         Calendar.getEvents(State.tomorrow),
       ]);
       State.todayCalEvents    = todayCal;
       State.tomorrowCalEvents = tomorrowCal;
-      mergeCalEvents(State.todayTimeline,    todayCal);
-      mergeCalEvents(State.tomorrowTimeline, tomorrowCal);
+      const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
+      const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
+      if (c1) scheduleSave(State.today);
+      if (c2) scheduleSave(State.tomorrow);
       renderAll();
     } catch (_) {
       // 認証エラーでもバナーは出さない（既にlocal表示済み）
@@ -746,18 +752,76 @@ async function navigateDates(delta) {
   }
 }
 
-// カレンダーイベントをタイムラインへ自動配置（未配置のものだけ）
-function mergeCalEvents(timeline, calEvents) {
-  const existingIds = timeline
-    .filter(item => item.itemType === 'calendar')
-    .map(item => item.itemId);
+// 開きっぱなしで日付をまたいだら「今日」を更新して表示し直す
+function maybeRolloverDate() {
+  if (!State.actualToday) return;          // 未起動
+  const real = todayStr();
+  if (real === State.actualToday) return;  // 日付は変わっていない
 
+  // 旧日付の未保存分を確定してから切り替え
+  flushActiveTimelines();
+
+  State.actualToday = real;
+  State.dateOffset  = 0;
+  State.today    = real;
+  State.tomorrow = addDays(real, -1);      // 左列＝昨日
+
+  const td = Store.get(CONFIG.LS.TL_PREFIX + State.today);
+  const tm = Store.get(CONFIG.LS.TL_PREFIX + State.tomorrow);
+  try { State.todayTimeline    = td ? JSON.parse(td) : []; } catch { State.todayTimeline    = []; }
+  try { State.tomorrowTimeline = tm ? JSON.parse(tm) : []; } catch { State.tomorrowTimeline = []; }
+  renderAll();
+
+  // 認証があればカレンダーも更新
+  if (!Auth.isExpired() && Auth.accessToken) {
+    loadWeekCalWidget();
+    Promise.all([
+      Calendar.getEvents(State.today),
+      Calendar.getEvents(State.tomorrow),
+    ]).then(([todayCal, tomorrowCal]) => {
+      State.todayCalEvents    = todayCal;
+      State.tomorrowCalEvents = tomorrowCal;
+      const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
+      const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
+      if (c1) scheduleSave(State.today);
+      if (c2) scheduleSave(State.tomorrow);
+      renderAll();
+    }).catch(() => {});
+  }
+}
+
+// カレンダーイベントをタイムラインへ反映する。
+// ・Googleカレンダーから消えた予定（幽霊予定）を削除（点数を付けたものは残す）
+// ・新しい予定を未配置スロットへ追加
+// 変更があれば true を返す（呼び出し側で保存するため）。
+// ※必ず「取得成功時」にのみ呼ぶこと（失敗時に呼ぶと正しい予定まで消える）
+function reconcileCalEvents(timeline, calEvents) {
+  const validIds = new Set(calEvents.map(e => e.id));
+  const hasScore = i => i.score !== null && i.score !== undefined;
+  let changed = false;
+
+  // ① 幽霊予定の削除（カレンダーに存在せず・点数なしのカレンダー項目）
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const item = timeline[i];
+    if (item.itemType === 'calendar' && !validIds.has(item.itemId) && !hasScore(item)) {
+      timeline.splice(i, 1);
+      changed = true;
+    }
+  }
+
+  // ② 新しい予定を追加（未配置のものだけ）
+  const existingIds = new Set(
+    timeline.filter(item => item.itemType === 'calendar').map(item => item.itemId),
+  );
   for (const event of calEvents) {
-    if (existingIds.includes(event.id)) continue;
+    if (existingIds.has(event.id)) continue;
     const slot = roundToSlot(event.time);
     if (!slot) continue;
     timeline.push({ itemType: 'calendar', itemId: event.id, timeSlot: slot, title: event.title });
+    changed = true;
   }
+
+  return changed;
 }
 
 // ============================================================
@@ -1144,7 +1208,7 @@ function onSlotDrop(e) {
   // 単発タスクはパネルから削除
   if (fromDate === 'unplaced' && itemType === 'onetime') {
     State.routines = State.routines.filter(r => r.id !== itemId);
-    Sheets.saveAllRoutines(State.routines).catch(() => {});
+    saveRoutines();
   }
 
   State.dragging = null;
@@ -1227,10 +1291,16 @@ function loadFromLocal() {
 }
 
 // ルーティンを localStorage に即時保存し、Sheets にはこっそり試みる
+// Sheets保存はデバウンス（連打しても1回にまとめ、並列の読み書き競合を防ぐ）
+let _routinesSaveTimer = null;
 function saveRoutines() {
   Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
+  if (_routinesSaveTimer) clearTimeout(_routinesSaveTimer);
   if (!Auth.isExpired() && Auth.accessToken) {
-    Sheets.saveAllRoutines(State.routines).catch(() => {});
+    _routinesSaveTimer = setTimeout(() => {
+      _routinesSaveTimer = null;
+      Sheets.saveAllRoutines(State.routines).catch(() => {});
+    }, 600);
   }
 }
 
@@ -1573,7 +1643,7 @@ function renderRoutineSettings() {
       _presetDrag = null;
       renderRoutineSettings();
       renderRoutinesPanel();
-      Sheets.saveAllRoutines(State.routines).catch(() => {});
+      saveRoutines();
     });
     // ✕ボタンがドラッグを誤発火させないように
     tag.querySelector('.preset-tag-del').addEventListener('mousedown', e => e.stopPropagation());
@@ -1725,6 +1795,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       flushActiveTimelines({ keepalive: true });
+    } else if (document.visibilityState === 'visible') {
+      // 開きっぱなしで日付をまたいだ場合、「今日」を更新して表示し直す
+      maybeRolloverDate();
     }
   });
   // 念のため pagehide でも（一部ブラウザで visibilitychange が発火しない場合）
