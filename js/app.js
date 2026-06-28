@@ -526,17 +526,24 @@ async function loadAll({ silent = false } = {}) {
 
   // 🔄 同期の場合：Sheetsへアップロードしてから取得（ローカルが常に優先）
   // タイムラインは2日分まとめて1回で保存（並列保存だと後勝ちで点数が巻き戻る）
+  // 【重要】空のローカルでシートを上書きしない（万一ローカルが壊れていても
+  //   シート側にデータが残っていれば取得で復旧できるようにする）
   if (!silent) {
-    try {
-      await Promise.all([
-        Sheets.saveAllRoutines(State.routines),
-        Sheets.saveTimelines({
-          [State.today]:    State.todayTimeline,
-          [State.tomorrow]: State.tomorrowTimeline,
-        }),
-      ]);
-    } catch (_) { /* アップロード失敗は無視してfetchを続行 */ }
+    const upJobs = [];
+    if (State.routines.length > 0) upJobs.push(Sheets.saveAllRoutines(State.routines));
+    const upMap = {};
+    if (State.todayTimeline.length    > 0) upMap[State.today]    = State.todayTimeline;
+    if (State.tomorrowTimeline.length > 0) upMap[State.tomorrow] = State.tomorrowTimeline;
+    if (Object.keys(upMap).length > 0) upJobs.push(Sheets.saveTimelines(upMap));
+    if (upJobs.length > 0) {
+      try { await Promise.all(upJobs); } catch (_) { /* 失敗は無視してfetch続行 */ }
+    }
   }
+
+  // ローカルの現在値スナップショット（取得失敗時にデータを守るため）
+  const localRoutines = Array.isArray(State.routines)        ? [...State.routines]        : [];
+  const localToday    = Array.isArray(State.todayTimeline)   ? [...State.todayTimeline]   : [];
+  const localTomorrow = Array.isArray(State.tomorrowTimeline)? [...State.tomorrowTimeline]: [];
 
   try {
     const [routines, todayTl, tomorrowTl] = await Promise.all([
@@ -545,8 +552,19 @@ async function loadAll({ silent = false } = {}) {
       Sheets.getTimeline(State.tomorrow),
     ]);
 
-    State.routines        = routines;
-    Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
+    // ルーティン：取得がローカルより少ない＝取得失敗とみなしローカルを保持
+    // （直前にローカルをアップロード済みなので、減るのは異常。全消失を防ぐ）
+    if (routines.length >= localRoutines.length && routines.length > 0) {
+      State.routines = routines;
+      Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
+    } else if (localRoutines.length > 0) {
+      console.warn('getRoutines がローカルより不足。ローカルを保持しシートを修復します');
+      State.routines = localRoutines;
+      Sheets.saveAllRoutines(localRoutines).catch(() => {});
+    } else {
+      State.routines = routines; // 両方空（新規ユーザー）
+      Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
+    }
 
     // 読み込み後に番号を振り直す（表示順と名前の番号がズレていたら修正して保存）
     {
@@ -573,9 +591,14 @@ async function loadAll({ silent = false } = {}) {
       }
       return [...map.values()];
     };
-    const cleanToday    = dedupTl(todayTl);
-    const cleanTomorrow = dedupTl(tomorrowTl);
-    if (cleanToday.length < todayTl.length || cleanTomorrow.length < tomorrowTl.length) {
+    let cleanToday    = dedupTl(todayTl);
+    let cleanTomorrow = dedupTl(tomorrowTl);
+    // 取得結果がローカルより項目が少ない＝取得/アップロード失敗とみなしローカルを守る
+    // （直前にローカルをアップロード済みなので、減るのは異常。今日のタスク消失を防ぐ）
+    let recovered = false;
+    if (cleanToday.length    < localToday.length)    { cleanToday    = localToday;    recovered = true; }
+    if (cleanTomorrow.length < localTomorrow.length) { cleanTomorrow = localTomorrow; recovered = true; }
+    if (recovered || cleanToday.length < todayTl.length || cleanTomorrow.length < tomorrowTl.length) {
       Sheets.saveTimelines({
         [State.today]:    cleanToday,
         [State.tomorrow]: cleanTomorrow,
@@ -645,21 +668,10 @@ async function loadAll({ silent = false } = {}) {
       Store.set(CONFIG.LS.MIGRATED_V9, '1');
     }
 
-    // 存在しないルーティンIDのタイムライン項目を削除（安全策）※スコアあり項目は保持
-    const validIds = new Set(State.routines.map(r => r.id));
-    const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
-    const cleanTimeline = tl => tl.filter(i =>
-      i.itemType !== 'routine' || validIds.has(i.itemId) || hasScore(i));
-    const todayCleaned    = State.todayTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId) && !hasScore(i));
-    const tomorrowCleaned = State.tomorrowTimeline.some(i => i.itemType === 'routine' && !validIds.has(i.itemId) && !hasScore(i));
-    State.todayTimeline    = cleanTimeline(State.todayTimeline);
-    State.tomorrowTimeline = cleanTimeline(State.tomorrowTimeline);
-    if (todayCleaned || tomorrowCleaned) {
-      await Sheets.saveTimelines({
-        [State.today]:    State.todayTimeline,
-        [State.tomorrow]: State.tomorrowTimeline,
-      }).catch(() => {});
-    }
+    // 【重要】以前ここで「存在しないルーティンIDのタイムライン項目を削除」していたが、
+    // ルーティン取得が一時的に欠けると今日のタスクごと消える事故の原因になったため廃止した。
+    // ローカルファーストの原則として、取得結果でローカルのタスクを削除しない。
+    // 孤立した項目はタイトル表示にフォールバックするだけで無害。
 
     // カレンダーを自動取得（失敗しても続行）
     try {
