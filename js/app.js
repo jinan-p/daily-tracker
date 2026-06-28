@@ -1308,10 +1308,11 @@ let _routinesSaveTimer = null;
 function saveRoutines() {
   Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines));
   if (_routinesSaveTimer) clearTimeout(_routinesSaveTimer);
-  if (!Auth.isExpired() && Auth.accessToken) {
+  // 空のルーティンでシートを上書きしない（壊れたローカルでシートを消さない）
+  if (State.routines.length > 0 && !Auth.isExpired() && Auth.accessToken) {
     _routinesSaveTimer = setTimeout(() => {
       _routinesSaveTimer = null;
-      Sheets.saveAllRoutines(State.routines).catch(() => {});
+      if (State.routines.length > 0) Sheets.saveAllRoutines(State.routines).catch(() => {});
     }, 600);
   }
 }
@@ -1326,10 +1327,14 @@ let _sheetsSaveTimer = null;
 // 必ずまとめて書く（saveTimelines がシート全体を1回で読み書きする）。
 function _saveBothToSheets({ keepalive = false } = {}) {
   if (Auth.isExpired() || !Auth.accessToken) return;
-  Sheets.saveTimelines({
-    [State.today]:    State.todayTimeline,
-    [State.tomorrow]: State.tomorrowTimeline,
-  }, { keepalive }).catch(() => {});
+  // 空の日はシートに送らない（＝シートの行を消さない）。
+  // 壊れた/空のローカルでシートを上書きして消す事故を防ぐ。
+  // ※項目の削除は、その日に1件でも残っていれば通常どおり同期される。
+  const map = {};
+  if (State.todayTimeline.length    > 0) map[State.today]    = State.todayTimeline;
+  if (State.tomorrowTimeline.length > 0) map[State.tomorrow] = State.tomorrowTimeline;
+  if (Object.keys(map).length === 0) return;
+  Sheets.saveTimelines(map, { keepalive }).catch(() => {});
 }
 
 // ============================================================
