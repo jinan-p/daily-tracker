@@ -997,15 +997,25 @@ function renderTimeline(containerId, timeline, date) {
   const colBody = container.parentElement;
   colBody.classList.toggle('tl-readonly', isPast);
 
+  // 入力中に再描画が走ってもカーソルが飛ばないよう、フォーカス位置を覚えておく
+  const _ae = document.activeElement;
+  const _focus = (_ae && _ae.classList?.contains('tl-note-input') && container.contains(_ae))
+    ? { id: _ae.dataset.id, slot: _ae.dataset.slot, date: _ae.dataset.date, pos: _ae.selectionStart }
+    : null;
+
   container.innerHTML = TIME_SLOTS.map(slot => {
     const isHour = slot.endsWith(':00');
     const items  = timeline.filter(item => item.timeSlot === slot);
     const itemsHtml = items.map(item => renderTlItem(item, date)).join('');
 
+    // 空きスロットのときだけ＋ボタンを全幅にする（アイテムがある枠では
+    // ＋が小さくなり、採点や入力のクリックを奪わない）
+    const zoneCls = items.length === 0 ? 'tl-zone tl-zone-empty' : 'tl-zone';
+
     return `
       <div class="tl-slot ${isHour ? 'tl-hour' : ''}">
         <div class="tl-time">${slot}</div>
-        <div class="tl-zone" data-time="${slot}" data-date="${date}">
+        <div class="${zoneCls}" data-time="${slot}" data-date="${date}">
           ${itemsHtml}
           <button class="tl-add-btn" data-slot="${slot}" data-date="${date}" title="手動タスクを追加">＋</button>
         </div>
@@ -1038,7 +1048,14 @@ function renderTimeline(containerId, timeline, date) {
 
   if (!isPast) {
     container.querySelectorAll('.tl-item-select').forEach(sel => {
-      sel.addEventListener('mousedown', e => e.stopPropagation());
+      // プルダウンも親のドラッグに邪魔されないよう、操作中は draggable を外す
+      const selHost = sel.closest('.tl-item');
+      sel.addEventListener('pointerdown', () => { if (selHost) selHost.draggable = false; });
+      sel.addEventListener('blur',        () => { if (selHost) selHost.draggable = true; });
+      sel.addEventListener('mousedown', e => {
+        if (selHost) selHost.draggable = false;
+        e.stopPropagation();
+      });
       sel.addEventListener('click',     e => e.stopPropagation());
       sel.addEventListener('change', e => {
         e.stopPropagation();
@@ -1053,8 +1070,22 @@ function renderTimeline(containerId, timeline, date) {
     });
 
     container.querySelectorAll('.tl-note-input').forEach(inp => {
-      inp.addEventListener('mousedown', e => e.stopPropagation());
-      inp.addEventListener('click',     e => e.stopPropagation());
+      const host = inp.closest('.tl-item');
+      // 入力中は親カードのドラッグを止める。draggable="true" の中にある input は
+      // クリックがドラッグ開始として扱われ、カーソルを置けない／文字を選べないため。
+      const unlockDrag = () => { if (host) host.draggable = false; };
+      const relockDrag = () => { if (host) host.draggable = true; };
+      inp.addEventListener('pointerdown', unlockDrag);
+      inp.addEventListener('mousedown', e => { unlockDrag(); e.stopPropagation(); });
+      inp.addEventListener('touchstart', unlockDrag, { passive: true });
+      inp.addEventListener('focus',      unlockDrag);
+      inp.addEventListener('blur',       relockDrag);
+      inp.addEventListener('click',      e => e.stopPropagation());
+      // Enter で入力を確定（フォーカスを外す）
+      inp.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter' && !e.isComposing) inp.blur();
+      });
       inp.addEventListener('input', e => {
         e.stopPropagation();
         const tl = inp.dataset.date === State.today ? State.todayTimeline : State.tomorrowTimeline;
@@ -1064,6 +1095,16 @@ function renderTimeline(containerId, timeline, date) {
           inp.closest('.tl-item').dataset.title = inp.value;
           scheduleSave(inp.dataset.date);
         }
+      });
+    });
+
+    // 「読書：」などのラベルをクリックしたら入力欄にフォーカスを移す
+    container.querySelectorAll('.tl-note-label').forEach(lbl => {
+      lbl.addEventListener('mousedown', e => e.stopPropagation());
+      lbl.addEventListener('click', e => {
+        e.stopPropagation();
+        const inp = lbl.parentElement?.querySelector('.tl-note-input');
+        if (inp) inp.focus();
       });
     });
 
@@ -1080,6 +1121,18 @@ function renderTimeline(containerId, timeline, date) {
         openManualTaskModal(btn.dataset.slot, btn.dataset.date);
       });
     });
+  }
+
+  // 再描画前に入力していた欄へフォーカスとカーソル位置を戻す
+  if (_focus) {
+    const esc = window.CSS?.escape ? s => CSS.escape(s) : s => s;
+    const back = container.querySelector(
+      `.tl-note-input[data-id="${esc(_focus.id)}"][data-slot="${esc(_focus.slot)}"][data-date="${esc(_focus.date)}"]`,
+    );
+    if (back) {
+      back.focus();
+      try { back.setSelectionRange(_focus.pos, _focus.pos); } catch (_) {}
+    }
   }
 }
 

@@ -1632,26 +1632,34 @@ body {
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
+  cursor: text; /* クリックで入力欄にフォーカスが移る */
 }
 .tl-note-input {
   flex: 1;
   font-size: 12px;
   font-weight: 500;
   color: var(--text);
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(255,255,255,0.25);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
   outline: none;
   font-family: inherit;
-  padding: 1px 4px;
-  min-width: 0;
+  padding: 3px 6px;
+  min-width: 60px;
+  min-height: 24px;
+  cursor: text;
+  /* .tl-item の user-select:none を打ち消して文字選択できるようにする */
+  user-select: text;
+  -webkit-user-select: text;
 }
 .tl-note-input::placeholder {
-  color: rgba(255,255,255,0.35);
+  color: var(--text-light);
   font-style: italic;
 }
 .tl-note-input:focus {
-  border-bottom-color: var(--primary);
+  border-color: var(--primary);
+  background: var(--card-bg);
+  box-shadow: 0 0 0 2px var(--primary-light);
 }
 
 /* 感想メモ トグル */
@@ -1684,21 +1692,26 @@ body {
   color: var(--primary);
   background: var(--primary-light);
   border-radius: 99px;
-  padding: 1px 7px;
+  padding: 3px 9px;
   flex-shrink: 0;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
+/* 未採点でも常に見えるようにする（ホバーしないと押せない状態を解消） */
 .tl-score-badge.empty {
   color: var(--text-light);
   background: var(--bg);
   border: 1px dashed var(--border);
   font-weight: 500;
-  opacity: 0;
+  opacity: 0.75;
 }
 
-.tl-item:hover .tl-score-badge.empty { opacity: 1; }
+.tl-item:hover .tl-score-badge.empty {
+  opacity: 1;
+  border-color: var(--primary);
+  color: var(--primary);
+}
 
 .tl-item-remove {
   background: none;
@@ -1721,7 +1734,9 @@ body {
    ============================================================ */
 .tl-add-btn {
   display: none;
-  width: 100%;
+  /* 既存アイテムがある枠では小さく出す。全幅だとアイテム周辺のクリックを
+     奪ってしまい、採点や入力のつもりが「手動タスク追加」になってしまうため */
+  width: 28px;
   padding: 2px 6px;
   border: 1px dashed var(--border);
   border-radius: 4px;
@@ -1732,8 +1747,11 @@ body {
   font-family: inherit;
   margin-top: 2px;
   transition: all 0.15s;
-  text-align: left;
+  text-align: center;
 }
+
+/* 空きスロットのときだけ全幅にして押しやすくする */
+.tl-zone-empty .tl-add-btn { width: 100%; text-align: left; }
 
 .tl-zone:hover .tl-add-btn { display: block; }
 .tl-add-btn:hover {
