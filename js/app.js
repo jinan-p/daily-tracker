@@ -1081,13 +1081,15 @@ function renderTimeline(containerId, timeline, date) {
       inp.addEventListener('focus',      unlockDrag);
       inp.addEventListener('blur',       relockDrag);
       inp.addEventListener('click',      e => e.stopPropagation());
-      // Enter で入力を確定（フォーカスを外す）
+      // Enter は改行（確定しない）。入力を終えたいときは欄の外をクリック or Esc。
       inp.addEventListener('keydown', e => {
         e.stopPropagation();
-        if (e.key === 'Enter' && !e.isComposing) inp.blur();
+        if (e.key === 'Escape') inp.blur();
       });
+      autoGrowNote(inp); // 既存の複数行コメントを最初から全部表示する
       inp.addEventListener('input', e => {
         e.stopPropagation();
+        autoGrowNote(inp);
         const tl = inp.dataset.date === State.today ? State.todayTimeline : State.tomorrowTimeline;
         const item = tl.find(i => i.itemId === inp.dataset.id && i.timeSlot === inp.dataset.slot);
         if (item) {
@@ -1136,6 +1138,13 @@ function renderTimeline(containerId, timeline, date) {
   }
 }
 
+// 感想メモ欄の高さを中身に合わせて自動調整（改行しても全部見えるように）
+function autoGrowNote(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
 function renderTlItem(item, date) {
   let icon, cls;
   if (item.itemType === 'calendar') {
@@ -1163,9 +1172,10 @@ function renderTlItem(item, date) {
       const noteVal = escapeHtml((item.title || '')
         .replace(new RegExp(`\\d+\\s*${escapeRegExp(noteLabel)}`), '') // 「25 動画」などを除去
         .replace(/^[：:\s]+|[：:\s]+$/g, ''));                          // 端の「：」や空白を除去
-      titleHtml = `<span class="tl-note-label">${escapeHtml(noteLabel)}：</span><input type="text" class="tl-note-input"
+      // textarea にすることで Enter が「確定」ではなく「改行」になり、続きを書ける
+      titleHtml = `<span class="tl-note-label">${escapeHtml(noteLabel)}：</span><textarea class="tl-note-input" rows="1"
         data-id="${item.itemId}" data-slot="${item.timeSlot}" data-date="${date}"
-        placeholder="コメントを入力…" value="${noteVal}">`;
+        placeholder="コメントを入力…">${noteVal}</textarea>`;
     } else if (routineItems.length > 0) {
       const opts = routineItems.map(i =>
         `<option value="${escapeHtml(i)}" ${i === item.title ? 'selected' : ''}>${escapeHtml(i)}</option>`
@@ -1178,11 +1188,14 @@ function renderTlItem(item, date) {
     titleHtml = `<span class="tl-item-name">${safe}</span>`;
   }
 
+  // 改行を含むコメントでも属性経由で失われないようにエンコードする
+  const safeAttr = safe.replace(/\n/g, '&#10;');
+
   return `
     <div class="tl-item ${cls}" draggable="true"
          data-type="${item.itemType}" data-id="${item.itemId}"
          data-slot="${item.timeSlot}" data-date="${date}"
-         data-title="${safe}">
+         data-title="${safeAttr}">
       <span class="tl-item-icon">${icon}</span>
       ${titleHtml}
       ${scoreLabel}
@@ -1243,22 +1256,28 @@ function onSlotDrop(e) {
   const toDate = e.currentTarget.dataset.date;
   const { itemType, itemId, title, fromSlot, fromDate } = State.dragging;
 
-  // 元の位置から削除
+  // 元の位置から削除（移動元の内容を引き継ぐため中身を控えておく）
+  let moved = null;
   if (fromDate !== 'unplaced') {
     const tl  = fromDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
     const idx = tl.findIndex(item => item.itemId === itemId && item.timeSlot === fromSlot);
-    if (idx !== -1) tl.splice(idx, 1);
+    if (idx !== -1) moved = tl.splice(idx, 1)[0];
   }
 
   // 新しい位置に追加
   const targetTl = toDate === State.today ? State.todayTimeline : State.tomorrowTimeline;
-  // 感想メモ欄つきルーティンは、入力欄をコメント専用にするためタイトルを空で配置
-  let placedTitle = title;
-  if (itemType === 'routine') {
+  // パネルから新規に置く感想メモ欄つきルーティンだけ、入力欄を空にする。
+  // 既にある項目の移動では、書いたコメントと点数をそのまま引き継ぐ。
+  let placedTitle = moved ? moved.title : title;
+  if (!moved && itemType === 'routine') {
     const dr = State.routines.find(rt => rt.id === itemId);
     if (dr?.noteMode) placedTitle = '';
   }
-  targetTl.push({ itemType, itemId, timeSlot: toSlot, title: placedTitle, score: null });
+  targetTl.push({
+    itemType, itemId, timeSlot: toSlot,
+    title: placedTitle,
+    score: moved ? (moved.score ?? null) : null,
+  });
 
   // ルーティンパネルからのドロップなら選択を次の項目へ進める
   if (fromDate === 'unplaced' && itemType === 'routine') {

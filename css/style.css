@@ -1648,10 +1648,22 @@ body {
   min-width: 60px;
   min-height: 24px;
   cursor: text;
+  /* Enter で改行できるよう textarea。手動リサイズは切り、高さはJSが自動調整 */
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
+  line-height: 1.5;
+  display: block;
   /* .tl-item の user-select:none を打ち消して文字選択できるようにする */
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* 複数行になったときはラベルと採点を上端に揃える */
+.tl-item:has(.tl-note-input) { align-items: flex-start; }
+.tl-item:has(.tl-note-input) .tl-note-label,
+.tl-item:has(.tl-note-input) .tl-score-badge,
+.tl-item:has(.tl-note-input) .tl-item-icon { margin-top: 2px; }
 .tl-note-input::placeholder {
   color: var(--text-light);
   font-style: italic;
