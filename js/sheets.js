@@ -94,16 +94,51 @@ const Sheets = {
     try {
       const meta = await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}?fields=sheets.properties.title`);
       const existing = meta.sheets.map(s => s.properties.title);
-      if (!existing.includes(CONFIG.SHEET.TIMELINE)) {
-        await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}:batchUpdate`, {
-          method: 'POST',
-          body: JSON.stringify({ requests: [{ addSheet: { properties: { title: CONFIG.SHEET.TIMELINE } } }] }),
-        });
-        await this._write(`${CONFIG.SHEET.TIMELINE}!A1`, [['date', 'itemType', 'itemId', 'timeSlot', 'title']]);
+
+      // 必要なシートと、その1行目の見出し
+      const needed = [
+        [CONFIG.SHEET.TIMELINE,        ['date', 'itemType', 'itemId', 'timeSlot', 'title', 'score']],
+        [CONFIG.SHEET.TIMELINE_BACKUP, ['控えた日時', '日付', '種類', 'itemId', '時間', '内容', '点数']],
+        [CONFIG.SHEET.ROUTINES_BACKUP, ['控えた日時', 'id', '名前', '並び順', 'presets', 'noteMode']],
+      ];
+      const missing = needed.filter(([title]) => !existing.includes(title));
+      if (missing.length === 0) return;
+
+      await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}:batchUpdate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          requests: missing.map(([title]) => ({ addSheet: { properties: { title } } })),
+        }),
+      });
+      for (const [title, header] of missing) {
+        await this._write(`${title}!A1`, [header]);
       }
     } catch (e) {
-      console.warn('Timeline sheet ensure error:', e);
+      console.warn('シートの用意でエラー:', e);
     }
+  },
+
+  // ------------------------------------------------------------
+  // 控え（バックアップ）シートへの追記
+  // ------------------------------------------------------------
+  // 【設計の要】控えシートには _append しか使わない。
+  // _write（上書き）も :clear（消去）も絶対に呼ばない。
+  // そのため本体のシートで何が起きても、控えが巻き添えで消えることはない。
+  // 失敗しても本体の保存は止めない（控えは「あれば助かる」もの）。
+  async _appendBackup(sheetName, rows) {
+    if (!rows || rows.length === 0) return;
+    try {
+      await this._append(`${sheetName}!A1`, rows);
+    } catch (e) {
+      console.warn('控えの追記に失敗（本体の保存は続行）:', e);
+    }
+  },
+
+  // 控えに残す日時（ブラウザのローカル時刻 = 日本時間）
+  _stamp() {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   },
 
   // ------------------------------------------------------------
@@ -201,9 +236,19 @@ const Sheets = {
       JSON.stringify(Array.isArray(r.presets) ? r.presets : []),
       r.noteMode ? 'TRUE' : 'FALSE',
     ]);
-    // 現在の行数を把握（余剰行クリア用）
-    const current = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:A1000`);
+    // 現在の中身を把握（余剰行クリア用 ＋ 控え用）
+    const current = await this._read(`${CONFIG.SHEET.ROUTINES}!A2:I1000`);
     const oldCount = current.length;
+
+    // 【控え】ルーティンが減るときだけ、消えようとしている行を控えシートへ退避する
+    if (oldCount > values.length) {
+      const keepIds = new Set(routines.map(r => r.id));
+      const stamp   = this._stamp();
+      const backup  = current
+        .filter(r => r[0] && !keepIds.has(r[0]))
+        .map(r => [stamp, r[0] || '', r[1] || '', r[5] || '', r[7] || '', r[8] || '']);
+      await this._appendBackup(CONFIG.SHEET.ROUTINES_BACKUP, backup);
+    }
     // ① 先に書き込む（消去前に書くことで電源断によるデータ消失を防ぐ）
     if (values.length > 0) {
       await this._write(`${CONFIG.SHEET.ROUTINES}!A2`, values);
@@ -286,6 +331,26 @@ const Sheets = {
         ]);
       }
     }
+    // 【控え】その日の行数が減るときだけ、消えようとしている行を控えシートへ退避する。
+    // 追加や点数の変更では何も控えない（控えが無駄に膨らまないように）。
+    // keepalive（ページを閉じる直前）はキャッシュ頼りなので控えは取らない。
+    if (!keepalive) {
+      const backup = [];
+      const stamp  = this._stamp();
+      for (const date of dates) {
+        const before = all.filter(r => r[0] === date);
+        const after  = map[date];
+        if (before.length <= after.length) continue; // 減っていないなら何もしない
+        const afterKeys = new Set(after.map(i => `${i.itemType}|${i.itemId}|${i.timeSlot}|${i.title}`));
+        for (const r of before) {
+          const key = `${r[1] || ''}|${r[2] || ''}|${r[3] || ''}|${r[4] || ''}`;
+          if (afterKeys.has(key)) continue; // 残る行は控えなくてよい
+          backup.push([stamp, r[0] || '', r[1] || '', r[2] || '', r[3] || '', r[4] || '', r[5] ?? '']);
+        }
+      }
+      await this._appendBackup(CONFIG.SHEET.TIMELINE_BACKUP, backup);
+    }
+
     const newAll = [...others, ...newRows];
 
     // 【安全弁】書き込み結果が0行になる場合は中止（シート全体の消失を防ぐ）

@@ -19,6 +19,10 @@ const CONFIG = {
   SHEET: {
     ROUTINES: 'Routines',
     TIMELINE: 'Timeline',
+    // 控え（バックアップ）シート。追記しかしない＝上書きも削除も絶対にしない。
+    // 消えかけた行をここに積んでおくことで、あとから必ず見返せるようにする。
+    TIMELINE_BACKUP: 'TimelineBackup',
+    ROUTINES_BACKUP: 'RoutinesBackup',
   },
 
   // localStorage キー
