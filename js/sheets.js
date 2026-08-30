@@ -188,6 +188,13 @@ const Sheets = {
   },
 
   async saveAllRoutines(routines) {
+    // 【安全弁】空のルーティンでシートを消さない。
+    // ローカルが壊れて空になった状態で保存が走ると、下の「余剰行クリア」が
+    // シート上のルーティンを全削除してしまうため、ここで必ず止める。
+    if (!Array.isArray(routines) || routines.length === 0) {
+      console.warn('saveAllRoutines: 空のため保存をスキップしました（シートを保護）');
+      return;
+    }
     // 全行を上書き（順序保証）
     const values = routines.map((r, i) => [
       r.id, r.name, r.category, r.duration, r.active ? 'TRUE' : 'FALSE', i, r.onetime ? 'TRUE' : 'FALSE',
@@ -253,7 +260,10 @@ const Sheets = {
   // keepalive:true のときはキャッシュを使い READ を省略（ページ終了時用）。
   // ------------------------------------------------------------
   async saveTimelines(map, { keepalive = false } = {}) {
-    const dates = Object.keys(map);
+    // 【安全弁】空の日はシートに送らない（＝その日の行を消さない）。
+    // 呼び出し側それぞれの判断に頼らず、ここで一括して防ぐ。
+    // ※項目の削除は、その日に1件でも残っていれば通常どおり同期される。
+    const dates = Object.keys(map).filter(d => Array.isArray(map[d]) && map[d].length > 0);
     if (dates.length === 0) return;
 
     let all;
@@ -277,11 +287,15 @@ const Sheets = {
       }
     }
     const newAll = [...others, ...newRows];
-    this._timelineCache = newAll;
 
-    if (newAll.length > 0) {
-      await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll, { keepalive });
+    // 【安全弁】書き込み結果が0行になる場合は中止（シート全体の消失を防ぐ）
+    if (newAll.length === 0) {
+      if (oldCount > 0) console.warn('saveTimelines: 全行が空になるため保存を中止しました（シートを保護）');
+      return;
     }
+
+    this._timelineCache = newAll;
+    await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll, { keepalive });
     // 行数が減った場合のみ余剰行をクリア（keepalive 時はスキップ）
     if (!keepalive && oldCount > newAll.length) {
       const startRow = newAll.length + 2;

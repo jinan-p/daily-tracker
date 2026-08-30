@@ -612,37 +612,22 @@ async function loadAll({ silent = false } = {}) {
       Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(cleanTomorrow));
     }
 
-    // スプレッドシートに「1 やることリスト」ルーティンが存在するか
-    const alreadyHasDefaultRoutines = State.routines.some(r => !r.onetime && r.name === '1 やることリスト');
-
-    // v3マイグレーション（スプレッドシートにデータがある場合はフラグだけ立てスキップ）
-    if (!Store.get('dt_migrated_v3')) {
-      if (!alreadyHasDefaultRoutines) {
-        State.routines = State.routines.filter(r => r.onetime);
+    // ------------------------------------------------------------
+    // 初回セットアップ（旧 v3 / v4 マイグレーション）
+    // 【重要】以前はここで「既定ルーティンが名前で見つからない」場合に、
+    //   ルーティンと今日・昨日のタスクを消して作り直していた。
+    //   しかしルーティンを並び替えると名前の先頭番号が変わって判定が外れるため、
+    //   localStorage が消えた端末で誤発動し、実データを全消しする危険があった。
+    //   そこで削除処理は完全に廃止し、「ルーティンもタスクも1件も無い＝本当の新規」
+    //   のときだけ既定ルーティンを“追加”する。ここでは何も削除しない。
+    // ------------------------------------------------------------
+    if (!Store.get('dt_migrated_v3') || !Store.get(CONFIG.LS.MIGRATED_V4)) {
+      const hasAnyRoutine  = State.routines.some(r => !r.onetime);
+      const hasAnyTimeline = State.todayTimeline.length > 0 || State.tomorrowTimeline.length > 0;
+      if (!hasAnyRoutine && !hasAnyTimeline) {
         await initDefaultRoutines();
-        State.todayTimeline    = State.todayTimeline.filter(i => i.itemType === 'calendar');
-        State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType === 'calendar');
-        await Sheets.saveTimelines({
-          [State.today]:    State.todayTimeline,
-          [State.tomorrow]: State.tomorrowTimeline,
-        }).catch(() => {});
       }
       Store.set('dt_migrated_v3', '1');
-    }
-
-    // v4マイグレーション（スプレッドシートにデータがある場合はフラグだけ立てスキップ）
-    if (!Store.get(CONFIG.LS.MIGRATED_V4)) {
-      if (!alreadyHasDefaultRoutines) {
-        State.routines = State.routines.filter(r => r.onetime);
-        await initDefaultRoutines();
-        const hasScore = i => i.score !== null && i.score !== undefined && i.score !== '';
-        State.todayTimeline    = State.todayTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
-        State.tomorrowTimeline = State.tomorrowTimeline.filter(i => i.itemType !== 'routine' || hasScore(i));
-        await Sheets.saveTimelines({
-          [State.today]:    State.todayTimeline,
-          [State.tomorrow]: State.tomorrowTimeline,
-        }).catch(() => {});
-      }
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
 
