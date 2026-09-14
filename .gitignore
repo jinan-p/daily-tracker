@@ -19,3 +19,9 @@
 *credentials*
 *secret*
 *apikey*
+
+# AIの引き継ぎファイル（CodexとClaude Code用）
+# このリポジトリは公開（Public）なので、個人の状況を書いた引き継ぎ書はGitHubに上げない
+AGENTS.md
+AI_HANDOFF.md
+CLAUDE.md
