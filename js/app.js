@@ -15,12 +15,6 @@ const TIME_SLOTS = (() => {
   return slots; // 51スロット: 05:00, 05:20, 05:40 ... 21:00, 21:20, 21:40
 })();
 
-const YARUKOTO_PRESETS = [
-  '船舶免許の住所変更', '山手皮膚科の予約', 'クレカ更新（エニタイム・Zoom）',
-  'ミニミニに確認（太陽光）', '太陽光発電の会社に連絡', 'Google / YouTube住所変更',
-  'プルデンシャル解約', '火災保険の継続→切替', 'デスク購入', 'iPhone購入',
-  '電子レンジ購入', 'ベッド購入', '人に会う（ヨンサン・イチパパ・ツボツボ）',
-];
 
 // ============================================================
 // 状態
@@ -462,25 +456,24 @@ async function launchApp() {
 // デフォルトルーティン初期化（初回のみ）
 // ============================================================
 async function initDefaultRoutines() {
-  // 「1 やることリスト」だけプリセット（プルダウン）付き。他はシンプルカード。
+  // 新規ユーザー向けの一般的な初期値。個人の予定はコードに埋め込まない。
   const names = [
     '1 やることリスト',
-    '2 企画シート',
-    '3 体重',
-    '4 株式',
-    '5 アウトプット',
-    '6 確定申告',
-    '7 簿記',
-    '8 部屋の片付け',
-    '9 ざわつかせた地図',
-    '10 パートナー',
-    '11 AI整理',
+    '2 企画',
+    '3 健康管理',
+    '4 調べもの',
+    '5 振り返り',
+    '6 書類整理',
+    '7 学習',
+    '8 片付け',
+    '9 作業',
+    '10 予定確認',
+    '11 情報整理',
     '12 メモ',
   ];
   names.forEach((name, i) => {
     const id = genId();
-    const presets = i === 0 ? [...YARUKOTO_PRESETS] : [];
-    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false, presets, noteMode: false });
+    State.routines.push({ id, name, category: 'default', duration: '', active: true, order: i, onetime: false, presets: [], noteMode: false });
   });
   Store.set(CONFIG.LS.ROUTINES, JSON.stringify(State.routines)); // localStorage にも保存
   await Sheets.saveAllRoutines(State.routines);
@@ -631,13 +624,8 @@ async function loadAll({ silent = false } = {}) {
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
     }
 
-    // 「1 やることリスト」のプリセット初期補填（スプレッドシートにデータがある場合はスキップ）
+    // 旧v7の初期補填は廃止。保存済みの候補には触れず、完了印だけを残す。
     if (!Store.get(CONFIG.LS.MIGRATED_V7)) {
-      const r1 = State.routines.find(r => r.name === '1 やることリスト');
-      if (r1 && (!Array.isArray(r1.presets) || r1.presets.length === 0)) {
-        r1.presets = [...YARUKOTO_PRESETS];
-        Sheets.saveAllRoutines(State.routines).catch(() => {});
-      }
       Store.set(CONFIG.LS.MIGRATED_V7, '1');
     }
 
