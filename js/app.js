@@ -40,6 +40,44 @@ const State = {
   _pendingSaves: { timelines: {}, routines: false },
 };
 
+// 通信開始時の表示日を固定する。往復して同じ日付に戻った場合も古い応答は使わない。
+let _viewVersion = 0;
+let _loadVersion = 0;
+let _calendarVersion = 0;
+
+function captureView() {
+  const version = _viewVersion;
+  const today = State.today;
+  const tomorrow = State.tomorrow;
+  return {
+    today, tomorrow,
+    isCurrent: () => version === _viewVersion && today === State.today && tomorrow === State.tomorrow,
+  };
+}
+
+// 取得中の採点・感想・追加・削除・並び替えを、件数だけでなく内容で検知する。
+function recordsSnapshot() {
+  return JSON.stringify([State.routines, State.todayTimeline, State.tomorrowTimeline]);
+}
+
+async function refreshCalendarForView(view = captureView()) {
+  if (!view.isCurrent()) return false;
+  const request = ++_calendarVersion;
+  const [todayCal, tomorrowCal] = await Promise.all([
+    Calendar.getEvents(view.today),
+    Calendar.getEvents(view.tomorrow),
+  ]);
+  if (!view.isCurrent() || request !== _calendarVersion) return false;
+  State.todayCalEvents = todayCal;
+  State.tomorrowCalEvents = tomorrowCal;
+  const c1 = reconcileCalEvents(State.todayTimeline, todayCal);
+  const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
+  if (c1) scheduleSave(view.today);
+  if (c2) scheduleSave(view.tomorrow);
+  renderAll();
+  return true;
+}
+
 // ============================================================
 // ユーティリティ
 // ============================================================
@@ -371,6 +409,7 @@ async function flushPendingSaves() {
 // アプリ起動
 // ============================================================
 async function launchApp() {
+  ++_viewVersion;
   document.getElementById('setupModal').classList.add('hidden');
   document.getElementById('setupModal').classList.remove('active');
   document.getElementById('app').classList.remove('hidden');
@@ -414,19 +453,9 @@ async function launchApp() {
         saveRoutines();
         scheduleSave(State.today);
         scheduleSave(State.tomorrow);
-        // カレンダーイベントだけ取得してマージ
-        Promise.all([
-          Calendar.getEvents(State.today),
-          Calendar.getEvents(State.tomorrow),
-        ]).then(([todayCal, tomorrowCal]) => {
-          State.todayCalEvents    = todayCal;
-          State.tomorrowCalEvents = tomorrowCal;
-          const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
-          const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
-          if (c1) scheduleSave(State.today);
-          if (c2) scheduleSave(State.tomorrow);
-          renderAll();
-          loadWeekCalWidget();
+        // カレンダーの応答が遅れても、移動後の日付には適用しない。
+        refreshCalendarForView().then(applied => {
+          if (applied) loadWeekCalWidget();
         }).catch(() => {});
       })
       .catch(() => {});
@@ -504,11 +533,14 @@ function addNoteRoutine(baseName) {
 // ============================================================
 // silent: true のとき、スピナーを出さず認証エラーもバナーを出さない（バックグラウンド同期用）
 async function loadAll({ silent = false } = {}) {
+  const view = captureView();
+  const request = ++_loadVersion;
+  const beforeSync = recordsSnapshot();
+  const unchanged = () => view.isCurrent() && request === _loadVersion && beforeSync === recordsSnapshot();
   const syncBtn = document.getElementById('btnSync');
-  const origLabel = syncBtn?.textContent;
   if (!silent && syncBtn) { syncBtn.textContent = '⏳'; syncBtn.disabled = true; }
 
-  const done = () => { if (!silent && syncBtn) { syncBtn.textContent = origLabel; syncBtn.disabled = false; } };
+  const done = () => { if (!silent && syncBtn && request === _loadVersion) { syncBtn.textContent = '🔄'; syncBtn.disabled = false; } };
 
   // トークンが期限切れの場合の処理
   if (Auth.isExpired()) {
@@ -529,9 +561,20 @@ async function loadAll({ silent = false } = {}) {
     if (State.tomorrowTimeline.length > 0) upMap[State.tomorrow] = State.tomorrowTimeline;
     if (Object.keys(upMap).length > 0) upJobs.push(Sheets.saveTimelines(upMap));
     if (upJobs.length > 0) {
-      try { await Promise.all(upJobs); } catch (_) { /* 失敗は無視してfetch続行 */ }
+      try {
+        await Promise.all(upJobs);
+      } catch (_) {
+        // 送信できていない手元の記録を、古いシートの取得結果で戻さない。
+        done();
+        if (view.isCurrent() && request === _loadVersion) {
+          showToast('同期できませんでした。手元の記録は保持しています。後でもう一度同期してください。', 'error');
+        }
+        return;
+      }
     }
   }
+
+  if (!unchanged()) { done(); return; }
 
   // ローカルの現在値スナップショット（取得失敗時にデータを守るため）
   const localRoutines = Array.isArray(State.routines)        ? [...State.routines]        : [];
@@ -541,9 +584,12 @@ async function loadAll({ silent = false } = {}) {
   try {
     const [routines, todayTl, tomorrowTl] = await Promise.all([
       Sheets.getRoutines(),
-      Sheets.getTimeline(State.today),
-      Sheets.getTimeline(State.tomorrow),
+      Sheets.getTimeline(view.today),
+      Sheets.getTimeline(view.tomorrow),
     ]);
+
+    // 取得中に編集・日付移動・新しい同期があったら、応答は適用しない。
+    if (!unchanged()) { done(); return; }
 
     // ルーティン：取得がローカルより少ない＝取得失敗とみなしローカルを保持
     // （直前にローカルをアップロード済みなので、減るのは異常。全消失を防ぐ）
@@ -619,6 +665,7 @@ async function loadAll({ silent = false } = {}) {
       const hasAnyTimeline = State.todayTimeline.length > 0 || State.tomorrowTimeline.length > 0;
       if (!hasAnyRoutine && !hasAnyTimeline) {
         await initDefaultRoutines();
+        if (!view.isCurrent() || request !== _loadVersion) { done(); return; }
       }
       Store.set('dt_migrated_v3', '1');
       Store.set(CONFIG.LS.MIGRATED_V4, '1');
@@ -648,21 +695,13 @@ async function loadAll({ silent = false } = {}) {
 
     // カレンダーを自動取得（失敗しても続行）
     try {
-      const [todayCal, tomorrowCal] = await Promise.all([
-        Calendar.getEvents(State.today),
-        Calendar.getEvents(State.tomorrow),
-      ]);
-      State.todayCalEvents    = todayCal;
-      State.tomorrowCalEvents = tomorrowCal;
-      const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
-      const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
-      if (c1) scheduleSave(State.today);
-      if (c2) scheduleSave(State.tomorrow);
+      await refreshCalendarForView(view);
     } catch (calErr) {
       console.warn('カレンダー取得エラー:', calErr);
-      showToast('カレンダー取得失敗: ' + calErr.message, 'error');
+      if (view.isCurrent()) showToast('カレンダー取得失敗: ' + calErr.message, 'error');
     }
 
+    if (!view.isCurrent() || request !== _loadVersion) { done(); return; }
     renderAll();
     done();
     showToast('読み込み完了 ✅');
@@ -686,9 +725,14 @@ async function loadAll({ silent = false } = {}) {
 // 日付ナビゲーション（← → ボタン）
 // ============================================================
 async function navigateDates(delta) {
+  // 切り替え前の日の保留分を、切り替え前の内容で保存キューへ入れる。
+  if (_sheetsSaveTimer) flushActiveTimelines();
+  ++_viewVersion;
   State.dateOffset  += delta;
   State.today    = addDays(State.actualToday, State.dateOffset);
   State.tomorrow = addDays(State.actualToday, State.dateOffset - 1);
+
+  const view = captureView();
 
   // ① localStorage から即時読み込み（認証不要）
   const tdRaw = Store.get(CONFIG.LS.TL_PREFIX + State.today);
@@ -706,31 +750,23 @@ async function navigateDates(delta) {
     try {
       if (needsToday || needsTomorrow) {
         const fetches = await Promise.all([
-          needsToday    ? Sheets.getTimeline(State.today)    : Promise.resolve(null),
-          needsTomorrow ? Sheets.getTimeline(State.tomorrow) : Promise.resolve(null),
+          needsToday    ? Sheets.getTimeline(view.today)    : Promise.resolve(null),
+          needsTomorrow ? Sheets.getTimeline(view.tomorrow) : Promise.resolve(null),
         ]);
-        if (fetches[0]) {
+        if (!view.isCurrent()) return;
+        // 取得待ちの間にその日を編集していたら、保存済みの手元を優先する。
+        if (fetches[0] && Store.get(CONFIG.LS.TL_PREFIX + view.today) === null) {
           State.todayTimeline = fetches[0];
-          Store.set(CONFIG.LS.TL_PREFIX + State.today, JSON.stringify(fetches[0]));
+          Store.set(CONFIG.LS.TL_PREFIX + view.today, JSON.stringify(fetches[0]));
         }
-        if (fetches[1]) {
+        if (fetches[1] && Store.get(CONFIG.LS.TL_PREFIX + view.tomorrow) === null) {
           State.tomorrowTimeline = fetches[1];
-          Store.set(CONFIG.LS.TL_PREFIX + State.tomorrow, JSON.stringify(fetches[1]));
+          Store.set(CONFIG.LS.TL_PREFIX + view.tomorrow, JSON.stringify(fetches[1]));
         }
       }
 
       // ③ カレンダーイベントを取得して反映
-      const [todayCal, tomorrowCal] = await Promise.all([
-        Calendar.getEvents(State.today),
-        Calendar.getEvents(State.tomorrow),
-      ]);
-      State.todayCalEvents    = todayCal;
-      State.tomorrowCalEvents = tomorrowCal;
-      const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
-      const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
-      if (c1) scheduleSave(State.today);
-      if (c2) scheduleSave(State.tomorrow);
-      renderAll();
+      await refreshCalendarForView(view);
     } catch (_) {
       // 認証エラーでもバナーは出さない（既にlocal表示済み）
     }
@@ -746,6 +782,7 @@ function maybeRolloverDate() {
   // 旧日付の未保存分を確定してから切り替え
   flushActiveTimelines();
 
+  ++_viewVersion;
   State.actualToday = real;
   State.dateOffset  = 0;
   State.today    = real;
@@ -760,18 +797,7 @@ function maybeRolloverDate() {
   // 認証があればカレンダーも更新
   if (!Auth.isExpired() && Auth.accessToken) {
     loadWeekCalWidget();
-    Promise.all([
-      Calendar.getEvents(State.today),
-      Calendar.getEvents(State.tomorrow),
-    ]).then(([todayCal, tomorrowCal]) => {
-      State.todayCalEvents    = todayCal;
-      State.tomorrowCalEvents = tomorrowCal;
-      const c1 = reconcileCalEvents(State.todayTimeline,    todayCal);
-      const c2 = reconcileCalEvents(State.tomorrowTimeline, tomorrowCal);
-      if (c1) scheduleSave(State.today);
-      if (c2) scheduleSave(State.tomorrow);
-      renderAll();
-    }).catch(() => {});
+    refreshCalendarForView().catch(() => {});
   }
 }
 

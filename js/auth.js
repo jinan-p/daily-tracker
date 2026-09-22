@@ -41,6 +41,8 @@ const Auth = {
         Auth._onSuccess(response);
       },
     });
+    // 再読み込みで復元したトークンにも、期限前の更新を予約する。
+    if (this.accessToken && Date.now() < exp) this._scheduleRefresh(exp - Date.now());
   },
 
   // ------------------------------------------------------------
@@ -79,8 +81,8 @@ const Auth = {
   // サイレント再認証（ポップアップなし・既存Googleセッション利用）
   // ページ読み込み時に自動で呼ぶ。Googleにログイン中なら成功する。
   // ------------------------------------------------------------
-  silentSignIn() {
-    if (this.accessToken && !this.isExpired()) {
+  silentSignIn({ forceRefresh = false } = {}) {
+    if (!forceRefresh && this.accessToken && !this.isExpired()) {
       return Promise.resolve(this.accessToken);
     }
     if (!this.tokenClient) {
@@ -123,7 +125,7 @@ const Auth = {
   _scheduleRefreshAttempt(delay, attempt) {
     this._refreshTimer = setTimeout(() => {
       this._refreshTimer = null;
-      this.silentSignIn().catch(() => {
+      this.silentSignIn({ forceRefresh: true }).catch(() => {
         if (attempt < 2) {
           // 失敗：2分後に再試行（最大3回）
           this._scheduleRefreshAttempt(2 * 60 * 1000, attempt + 1);

@@ -5,6 +5,19 @@
 const Sheets = {
   sheetId: null,
 
+  // 保存は読み込み・控え・上書き・余剰行消去までを順番に実行する。
+  // 途中の失敗は呼び出し元へ返すが、後続の保存は止めない。
+  _saveQueue: Promise.resolve(),
+  _enqueueSave(task) {
+    const sheetId = this.sheetId;
+    const pending = this._saveQueue.then(() => {
+      if (this.sheetId !== sheetId) throw new Error('保存先が変更されました。もう一度同期してください。');
+      return task();
+    });
+    this._saveQueue = pending.catch(() => {});
+    return pending;
+  },
+
   init(sheetId) {
     this.sheetId = sheetId;
   },
@@ -223,6 +236,14 @@ const Sheets = {
   },
 
   async saveAllRoutines(routines) {
+    if (!Array.isArray(routines) || routines.length === 0) return;
+    const snapshot = routines.map(r => ({
+      ...r, presets: Array.isArray(r.presets) ? [...r.presets] : [],
+    }));
+    return this._enqueueSave(() => this._saveAllRoutines(snapshot));
+  },
+
+  async _saveAllRoutines(routines) {
     // 【安全弁】空のルーティンでシートを消さない。
     // ローカルが壊れて空になった状態で保存が走ると、下の「余剰行クリア」が
     // シート上のルーティンを全削除してしまうため、ここで必ず止める。
@@ -266,8 +287,9 @@ const Sheets = {
   // ============================================================
 
   async getTimeline(date) {
+    const revision = this._timelineRevision;
     const rows = await this._read(`${CONFIG.SHEET.TIMELINE}!A2:F10000`);
-    this._timelineCache = rows; // keepalive 保存用キャッシュを更新
+    if (revision === this._timelineRevision) this._timelineCache = rows; // keepalive 保存用キャッシュを更新
     return rows
       .filter(r => r[0] === date)
       .map(r => ({
@@ -296,15 +318,26 @@ const Sheets = {
 
   // タイムラインシートの最終読み込みキャッシュ（keepalive保存でネットワーク読み取りを省略するため）
   _timelineCache: null,
+  _timelineRevision: 0,
 
   // ------------------------------------------------------------
   // 複数日をまとめて1回で保存（読み→書きを1回にして競合を防ぐ）
   // saveTimeline を日付ごとに並列で呼ぶと、各呼び出しがシート全体を
   // 読み直して書き戻すため、後勝ちで他日付の更新（点数など）が
-  // 巻き戻ってしまう。まとめて書くことでこのレースを根絶する。
+  // 巻き戻ってしまう。日付はまとめ、さらに保存キューで呼び出し同士の重なりも防ぐ。
   // keepalive:true のときはキャッシュを使い READ を省略（ページ終了時用）。
   // ------------------------------------------------------------
   async saveTimelines(map, { keepalive = false } = {}) {
+    // 待ち時間中に画面側の配列が変わっても、この保存の内容と日付は変えない。
+    const snapshot = {};
+    for (const [date, items] of Object.entries(map)) {
+      if (Array.isArray(items) && items.length > 0) snapshot[date] = items.map(item => ({ ...item }));
+    }
+    if (Object.keys(snapshot).length === 0) return;
+    return this._enqueueSave(() => this._saveTimelines(snapshot, { keepalive }));
+  },
+
+  async _saveTimelines(map, { keepalive = false } = {}) {
     // 【安全弁】空の日はシートに送らない（＝その日の行を消さない）。
     // 呼び出し側それぞれの判断に頼らず、ここで一括して防ぐ。
     // ※項目の削除は、その日に1件でも残っていれば通常どおり同期される。
@@ -359,8 +392,9 @@ const Sheets = {
       return;
     }
 
-    this._timelineCache = newAll;
     await this._write(`${CONFIG.SHEET.TIMELINE}!A2`, newAll, { keepalive });
+    ++this._timelineRevision;
+    this._timelineCache = newAll;
     // 行数が減った場合のみ余剰行をクリア（keepalive 時はスキップ）
     if (!keepalive && oldCount > newAll.length) {
       const startRow = newAll.length + 2;
