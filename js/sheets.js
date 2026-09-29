@@ -115,19 +115,46 @@ const Sheets = {
         [CONFIG.SHEET.ROUTINES_BACKUP, ['控えた日時', 'id', '名前', '並び順', 'presets', 'noteMode']],
       ];
       const missing = needed.filter(([title]) => !existing.includes(title));
-      if (missing.length === 0) return;
 
-      await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}:batchUpdate`, {
-        method: 'POST',
-        body: JSON.stringify({
-          requests: missing.map(([title]) => ({ addSheet: { properties: { title } } })),
-        }),
-      });
-      for (const [title, header] of missing) {
-        await this._write(`${title}!A1`, [header]);
+      if (missing.length > 0) {
+        await this._req(`${CONFIG.SHEETS_BASE}/${this.sheetId}:batchUpdate`, {
+          method: 'POST',
+          body: JSON.stringify({
+            requests: missing.map(([title]) => ({ addSheet: { properties: { title } } })),
+          }),
+        });
+        for (const [title, header] of missing) {
+          await this._writeHeader(title, header);
+        }
+      }
+
+      // 【自己修復】控えシートはあるのに見出し行が無い状態を1度だけ直す。
+      // 2026-09-29に実際に発生：シート作成直後の書き込みが失敗し、
+      // 外側の catch に飲まれて見出しだけ欠けたまま気づけなかった。
+      if (!Store.get(CONFIG.LS.BACKUP_HEADER_FIXED)) {
+        for (const [title, header] of needed) {
+          if (title === CONFIG.SHEET.TIMELINE) continue;              // 本体シートには触らない
+          if (missing.some(([t]) => t === title)) continue;           // いま作った分は書き込み済み
+          // A1が空のときだけ書く。控えの行が入っていれば上書きしない。
+          const first = await this._read(`${title}!A1:A1`).catch(() => null);
+          if (Array.isArray(first) && first.length === 0) await this._writeHeader(title, header);
+        }
+        Store.set(CONFIG.LS.BACKUP_HEADER_FIXED, '1');
       }
     } catch (e) {
       console.warn('シートの用意でエラー:', e);
+    }
+  },
+
+  // 作ったばかりのシート名はすぐに反映されず書き込みが失敗することがある。
+  // 見出しが欠けても本体の保存は動くので、1度だけ待って再試行し、失敗は記録だけ残す。
+  async _writeHeader(title, header) {
+    try {
+      await this._write(`${title}!A1`, [header]);
+    } catch (_) {
+      await new Promise(r => setTimeout(r, 1500));
+      await this._write(`${title}!A1`, [header])
+        .catch(err => console.warn(`${title} の見出し書き込みに失敗:`, err));
     }
   },
 

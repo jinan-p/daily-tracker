@@ -43,6 +43,7 @@ const CONFIG = {
     MIGRATED_V7:  'dt_migrated_v7',
     MIGRATED_V8:  'dt_migrated_v8',
     MIGRATED_V9:  'dt_migrated_v9',
+    BACKUP_HEADER_FIXED: 'dt_backup_header_fixed',
     ROUTINES:     'dt_routines',
     TL_PREFIX:    'dt_tl_',
   },
